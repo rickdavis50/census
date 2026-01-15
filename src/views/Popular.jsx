@@ -93,34 +93,14 @@ function Popular() {
   const anchorRows = primaryState?.rows.slice(0, MAX_ROWS) ?? [];
   const stateMap = new Map(results.map((item) => [item.id, item]));
 
-  const renderColumn = (stateId) => {
+  const getStateMetrics = (stateId) => {
     const stateData = stateMap.get(stateId);
     const maxValue =
       stateData?.rows.reduce((max, row) => Math.max(max, row.value), 0) || 1;
-
-    return (
-      <div className="space-y-3">
-        {anchorRows.map((row) => {
-          const match = stateData?.rows.find((item) => item.code === row.code);
-          const value = match?.value ?? 0;
-          return (
-            <div key={`${stateId}-${row.code}`} className="space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zb-ink-muted">
-                  {formatNumber(value)}
-                </span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-zb-subtle">
-                <div
-                  className="h-2 rounded-full bg-zb-blue"
-                  style={{ width: `${(value / maxValue) * 100}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    const metrics = new Map(
+      stateData?.rows.map((row) => [row.code, row.value]) ?? []
     );
+    return { maxValue, metrics };
   };
 
   return (
@@ -134,51 +114,72 @@ function Popular() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
-            Industry
-          </p>
-          <div className="space-y-3 pt-1">
+      <div className="grid gap-4">
+        <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))] items-end gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+              Industry
+            </p>
+          </div>
+          {stateIds.map((stateId, index) => {
+            const current = stateOptions.find((option) => option.id === stateId);
+            const available = stateOptions.filter(
+              (option) =>
+                option.id === stateId || !stateIds.includes(option.id)
+            );
+
+            return (
+              <div key={`select-${stateId}`} className="space-y-2">
+                <Select
+                  value={stateId}
+                  onChange={(event) =>
+                    setStateAtIndex(index, event.target.value)
+                  }
+                >
+                  {available.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+                <p className="text-xs text-zb-ink-muted">
+                  {current?.label ?? "State"}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+
+        {status === "loading" && (
+          <p className="text-sm text-zb-ink-muted">Loading data...</p>
+        )}
+
+        {status === "success" && (
+          <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))] gap-4">
             {anchorRows.map((row) => (
-              <div key={row.code} className="text-xs">
-                {row.label}
+              <div key={row.code} className="contents">
+                <div className="text-xs">{row.label}</div>
+                {stateIds.map((stateId) => {
+                  const { maxValue, metrics } = getStateMetrics(stateId);
+                  const value = metrics.get(row.code) ?? 0;
+                  return (
+                    <div key={`${stateId}-${row.code}`} className="space-y-2">
+                      <div className="text-xs text-zb-ink-muted">
+                        {formatNumber(value)}
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-zb-subtle">
+                        <div
+                          className="h-2 rounded-full bg-zb-blue"
+                          style={{ width: `${(value / maxValue) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
-        </div>
-
-        {stateIds.map((stateId, index) => {
-          const current = stateOptions.find((option) => option.id === stateId);
-          const available = stateOptions.filter(
-            (option) =>
-              option.id === stateId || !stateIds.includes(option.id)
-          );
-
-          return (
-            <div key={stateId} className="space-y-2">
-              <Select
-                value={stateId}
-                onChange={(event) => setStateAtIndex(index, event.target.value)}
-              >
-                {available.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-              <p className="text-xs text-zb-ink-muted">
-                {current?.label ?? "State"}
-              </p>
-              {status === "loading" && (
-                <p className="text-xs text-zb-ink-muted">
-                  Loading data...
-                </p>
-              )}
-              {status === "success" && renderColumn(stateId)}
-            </div>
-          );
-        })}
+        )}
       </div>
 
       {status === "error" && (
