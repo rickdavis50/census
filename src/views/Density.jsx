@@ -31,10 +31,7 @@ function Density({ geo, yearRange }) {
           for: "state:*",
         });
         const nonempUrl = buildUrl(DATASETS.nonemp.getBase(nonempYear), {
-          get: [
-            DATASETS.nonemp.variables.establishments,
-            DATASETS.nonemp.variablesByYear[nonempYear].naics,
-          ],
+          get: [DATASETS.nonemp.variables.establishments],
           for: "state:*",
           [DATASETS.nonemp.variablesByYear[nonempYear].naics]: "00",
         });
