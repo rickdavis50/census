@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
+import Select from "../components/Select";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { DATASETS, NONEMP_YEARS } from "../lib/datasets";
 import { GEO_OPTIONS, getGeoParams } from "../lib/geography";
 
 const MAX_ROWS = 8;
-const MAX_STATES = 3;
 
 const isSectorCode = (code) => code.length === 2 && code !== "00";
 
@@ -22,15 +22,14 @@ function Popular() {
     []
   );
 
-  const toggleState = (id) => {
+  const setStateAtIndex = (index, id) => {
     setStateIds((prev) => {
       if (prev.includes(id)) {
-        return prev.filter((item) => item !== id);
-      }
-      if (prev.length >= MAX_STATES) {
         return prev;
       }
-      return [...prev, id];
+      const next = [...prev];
+      next[index] = id;
+      return next;
     });
   };
 
@@ -46,11 +45,6 @@ function Popular() {
         const selections = stateOptions.filter((option) =>
           stateIds.includes(option.id)
         );
-        if (!selections.length) {
-          setResults([]);
-          setStatus("success");
-          return;
-        }
 
         const dataByState = await Promise.all(
           selections.map(async (option) => {
@@ -72,10 +66,9 @@ function Popular() {
                 value: Number(row[2]),
               }))
               .filter((row) => isSectorCode(row.code))
-              .sort((a, b) => b.value - a.value)
-              .slice(0, MAX_ROWS);
+              .sort((a, b) => b.value - a.value);
 
-            return { state: option.label, rows };
+            return { state: option.label, id: option.id, rows };
           })
         );
 
@@ -96,6 +89,40 @@ function Popular() {
     };
   }, [stateIds, stateOptions]);
 
+  const primaryState = results.find((item) => item.id === stateIds[0]);
+  const anchorRows = primaryState?.rows.slice(0, MAX_ROWS) ?? [];
+  const stateMap = new Map(results.map((item) => [item.id, item]));
+
+  const renderColumn = (stateId) => {
+    const stateData = stateMap.get(stateId);
+    const maxValue =
+      stateData?.rows.reduce((max, row) => Math.max(max, row.value), 0) || 1;
+
+    return (
+      <div className="space-y-3">
+        {anchorRows.map((row) => {
+          const match = stateData?.rows.find((item) => item.code === row.code);
+          const value = match?.value ?? 0;
+          return (
+            <div key={`${stateId}-${row.code}`} className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zb-ink-muted">
+                  {formatNumber(value)}
+                </span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-zb-subtle">
+                <div
+                  className="h-2 rounded-full bg-zb-blue"
+                  style={{ width: `${(value / maxValue) * 100}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <Card className="space-y-6 p-6">
       <div className="space-y-2">
@@ -107,80 +134,59 @@ function Popular() {
         </p>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
-          Select up to {MAX_STATES} states
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {stateOptions.map((option) => {
-            const isSelected = stateIds.includes(option.id);
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => toggleState(option.id)}
-                className={[
-                  "rounded-zb-md border px-3 py-2 text-xs font-medium",
-                  isSelected
-                    ? "border-zb-blue bg-zb-surface text-zb-ink"
-                    : "border-zb-border text-zb-ink-muted",
-                ].join(" ")}
-              >
-                {option.label}
-              </button>
-            );
-          })}
+      <div className="grid gap-4 md:grid-cols-4">
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+            Industry
+          </p>
+          <div className="rounded-zb-md border border-zb-border bg-zb-surface px-3 py-2 text-xs text-zb-ink-muted">
+            Based on {primaryState?.state ?? "selected"} rankings
+          </div>
+          <div className="space-y-3 pt-1">
+            {anchorRows.map((row) => (
+              <div key={row.code} className="text-xs">
+                {row.label}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {status === "loading" && (
-        <p className="text-sm text-zb-ink-muted">Loading nonemployer data...</p>
-      )}
+        {stateIds.map((stateId, index) => {
+          const current = stateOptions.find((option) => option.id === stateId);
+          const available = stateOptions.filter(
+            (option) =>
+              option.id === stateId || !stateIds.includes(option.id)
+          );
+
+          return (
+            <div key={stateId} className="space-y-2">
+              <Select
+                value={stateId}
+                onChange={(event) => setStateAtIndex(index, event.target.value)}
+              >
+                {available.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-zb-ink-muted">
+                {current?.label ?? "State"}
+              </p>
+              {status === "loading" && (
+                <p className="text-xs text-zb-ink-muted">
+                  Loading data...
+                </p>
+              )}
+              {status === "success" && renderColumn(stateId)}
+            </div>
+          );
+        })}
+      </div>
 
       {status === "error" && (
         <div className="rounded-zb-sm border border-zb-border bg-zb-subtle px-4 py-3 text-sm text-zb-ink">
           Error loading data: {error}
-        </div>
-      )}
-
-      {status === "success" && results.length === 0 && (
-        <p className="text-sm text-zb-ink-muted">
-          Select at least one state to compare.
-        </p>
-      )}
-
-      {status === "success" && results.length > 0 && (
-        <div className="grid gap-6 md:grid-cols-3">
-          {results.map((state) => {
-            const maxValue =
-              state.rows.reduce((max, row) => Math.max(max, row.value), 0) || 1;
-
-            return (
-              <div key={state.state} className="space-y-4">
-                <p className="text-sm font-medium">{state.state}</p>
-                <div className="space-y-3">
-                  {state.rows.map((row) => (
-                    <div key={row.code} className="space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span>{row.label}</span>
-                        <span className="text-zb-ink-muted">
-                          {formatNumber(row.value)}
-                        </span>
-                      </div>
-                      <div className="h-2 w-full rounded-full bg-zb-subtle">
-                        <div
-                          className="h-2 rounded-full bg-zb-blue"
-                          style={{
-                            width: `${(row.value / maxValue) * 100}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
         </div>
       )}
 
