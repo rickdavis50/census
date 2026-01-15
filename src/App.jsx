@@ -4,14 +4,12 @@ import Select from "./components/Select";
 import Tabs from "./components/Tabs";
 import { ACS_YEARS } from "./lib/datasets";
 import { GEO_OPTIONS, getGeoLabel } from "./lib/geography";
-import Demographics from "./views/Demographics";
 import Density from "./views/Density";
 import Growing from "./views/Growing";
-import Momentum from "./views/Momentum";
 import Popular from "./views/Popular";
 
 function App() {
-  const [activeTab, setActiveTab] = useState("momentum");
+  const [activeTab, setActiveTab] = useState("popular");
   const [geoId, setGeoId] = useState("us");
 
   const geo = useMemo(
@@ -20,10 +18,8 @@ function App() {
   );
 
   const tabs = [
-    { id: "momentum", label: "Momentum" },
     { id: "popular", label: "Popular" },
     { id: "growing", label: "Growing" },
-    { id: "demographics", label: "Demographics" },
     { id: "density", label: "Density" },
   ];
 
@@ -33,13 +29,10 @@ function App() {
         return Popular;
       case "growing":
         return Growing;
-      case "demographics":
-        return Demographics;
       case "density":
         return Density;
-      case "momentum":
       default:
-        return Momentum;
+        return Popular;
     }
   }, [activeTab]);
 
@@ -63,25 +56,27 @@ function App() {
             </p>
             <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
           </div>
-          <div className="w-full md:w-64">
-            <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
-              Geography
-            </p>
-            <Select
-              value={geoId}
-              onChange={(event) => setGeoId(event.target.value)}
-              className="mt-2"
-            >
-              {GEO_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
-            <p className="mt-2 text-xs text-zb-ink-muted">
-              Viewing: {getGeoLabel(geo)}
-            </p>
-          </div>
+          {activeTab === "growing" && (
+            <div className="w-full md:w-64">
+              <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+                Geography
+              </p>
+              <Select
+                value={geoId}
+                onChange={(event) => setGeoId(event.target.value)}
+                className="mt-2"
+              >
+                {GEO_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-2 text-xs text-zb-ink-muted">
+                Viewing: {getGeoLabel(geo)}
+              </p>
+            </div>
+          )}
         </div>
 
         <View geo={geo} yearRange={ACS_YEARS} />
