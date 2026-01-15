@@ -1,6 +1,6 @@
 function Badge({ children, className, ...props }) {
   const classes = [
-    "inline-flex items-center rounded-full border border-zb-border bg-zb-surface px-2.5 py-1 text-xs font-medium text-zb-ink-muted",
+    "inline-flex items-center rounded-full border border-dash-border bg-dash-surface px-2.5 py-1 text-xs font-medium text-dash-muted",
     className,
   ]
     .filter(Boolean)

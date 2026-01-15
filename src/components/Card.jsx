@@ -1,6 +1,6 @@
 function Card({ children, className, ...props }) {
   const classes = [
-    "rounded-zb-lg border border-zb-border bg-zb-surface shadow-zb-1",
+    "dash-card",
     className,
   ]
     .filter(Boolean)

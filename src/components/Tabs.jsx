@@ -14,9 +14,9 @@ function Tabs({ tabs, active, onChange }) {
       className="relative max-w-full"
       style={{
         WebkitMaskImage:
-          "linear-gradient(90deg, transparent, black 16px, black calc(100% - 16px), transparent)",
+          "linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent)",
         maskImage:
-          "linear-gradient(90deg, transparent, black 16px, black calc(100% - 16px), transparent)",
+          "linear-gradient(90deg, transparent, black 12px, black calc(100% - 12px), transparent)",
       }}
     >
       <div
@@ -32,10 +32,10 @@ function Tabs({ tabs, active, onChange }) {
               type="button"
               onClick={() => onChange(tab.id)}
               className={[
-                "whitespace-nowrap rounded-zb-md border px-3 py-2 text-sm font-medium transition",
+                "whitespace-nowrap rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition",
                 isActive
-                  ? "border-zb-blue bg-zb-surface text-zb-ink"
-                  : "border-zb-border text-zb-ink-muted hover:text-zb-ink",
+                  ? "border-dash-accent-2 bg-dash-surface-2 text-dash-ink shadow-dash-sm"
+                  : "border-dash-border text-dash-muted hover:text-dash-ink",
               ].join(" ")}
             >
               {tab.label}

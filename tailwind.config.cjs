@@ -4,6 +4,18 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        "dash-bg": "var(--dash-bg)",
+        "dash-bg-2": "var(--dash-bg-2)",
+        "dash-surface": "var(--dash-surface)",
+        "dash-surface-2": "var(--dash-surface-2)",
+        "dash-border": "var(--dash-border)",
+        "dash-ink": "var(--dash-ink)",
+        "dash-muted": "var(--dash-muted)",
+        "dash-accent-1": "var(--dash-accent-1)",
+        "dash-accent-2": "var(--dash-accent-2)",
+        "dash-accent-3": "var(--dash-accent-3)",
+        "dash-accent-4": "var(--dash-accent-4)",
+        "dash-accent-5": "var(--dash-accent-5)",
         "zb-bg": "var(--zb-bg)",
         "zb-surface": "var(--zb-surface)",
         "zb-surface-strong": "var(--zb-surface-strong)",
@@ -32,11 +44,16 @@ module.exports = {
         ui: ["var(--zb-font-ui)", "Inter", "system-ui", "sans-serif"],
       },
       borderRadius: {
+        "dash-md": "var(--dash-radius-md)",
+        "dash-lg": "var(--dash-radius-lg)",
         "zb-sm": "var(--zb-radius-sm)",
         "zb-md": "var(--zb-radius-md)",
         "zb-lg": "var(--zb-radius-lg)",
       },
       boxShadow: {
+        "dash-sm": "var(--dash-shadow-sm)",
+        "dash-md": "var(--dash-shadow-md)",
+        "dash-lg": "var(--dash-shadow-lg)",
         "zb-1": "var(--zb-shadow-1)",
         "zb-2": "var(--zb-shadow-2)",
       },

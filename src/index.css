@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Montserrat:wght@500;600;700&display=swap");
+@import url("./styles/dashboard.tokens.css");
 
 @tailwind base;
 @tailwind components;
@@ -59,7 +60,8 @@
   }
 
   body {
-    @apply bg-zb-bg text-zb-ink font-ui;
+    @apply text-dash-ink font-ui;
+    background: var(--dash-bg-gradient);
     margin: 0;
     min-height: 100vh;
   }
