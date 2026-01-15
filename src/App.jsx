@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import Badge from "./components/Badge";
+import Card from "./components/Card";
+import StatRow from "./components/StatRow";
 
 const YEARS = [2023, 2022, 2021];
 
@@ -55,36 +58,64 @@ function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white text-black p-6">
-      <div className="max-w-xl space-y-4">
-        <h1 className="text-xl font-semibold">
-          U.S. Population (Last 3 Years)
-        </h1>
+    <div className="min-h-screen bg-zb-bg text-zb-ink">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-10">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+              Census Explorer
+            </p>
+            <h1 className="text-2xl font-semibold">
+              U.S. Population (Last 3 Years)
+            </h1>
+          </div>
+          <Badge>Data: U.S. Census</Badge>
+        </header>
 
-        {status === "loading" && <p className="text-sm">Loading...</p>}
+        <Card className="space-y-6 p-6">
+          <div className="space-y-2">
+            <p className="text-sm text-zb-ink-muted">
+              ACS 1-Year Estimates for total population, national level.
+            </p>
+            <div className="space-y-1">
+              <StatRow label="Dataset" value="ACS 1-Year" />
+              <StatRow label="Geography" value="United States" />
+            </div>
+          </div>
 
-        {status === "error" && (
-          <p className="text-sm text-red-700">Error: {error}</p>
-        )}
+          {status === "loading" && (
+            <p className="text-sm text-zb-ink-muted">Loading data...</p>
+          )}
 
-        {status === "success" && (
-          <table className="w-full border border-black text-sm">
-            <thead>
-              <tr className="border-b border-black">
-                <th className="p-2 text-left">Year</th>
-                <th className="p-2 text-left">Population</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.year} className="border-b border-black">
-                  <td className="p-2">{row.year}</td>
-                  <td className="p-2">{Number(row.population).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+          {status === "error" && (
+            <div className="rounded-zb-sm border border-zb-border bg-zb-subtle px-4 py-3 text-sm text-zb-ink">
+              Error loading data: {error}
+            </div>
+          )}
+
+          {status === "success" && (
+            <div className="overflow-hidden rounded-zb-md border border-zb-border">
+              <table className="w-full text-sm">
+                <thead className="bg-zb-surface-strong text-left text-zb-ink-muted">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">Year</th>
+                    <th className="px-4 py-3 font-medium">Population</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zb-border">
+                  {rows.map((row) => (
+                    <tr key={row.year} className="odd:bg-zb-surface">
+                      <td className="px-4 py-3">{row.year}</td>
+                      <td className="px-4 py-3">
+                        {Number(row.population).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
