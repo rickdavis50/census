@@ -6,6 +6,7 @@ export const DATASETS = {
   acs: {
     name: "ACS 1-Year Estimates",
     getBase: (year) => `https://api.census.gov/data/${year}/acs/acs1`,
+    getBase5: (year) => `https://api.census.gov/data/${year}/acs/acs5`,
     variables: {
       population: "B01003_001E",
     },
@@ -48,6 +49,83 @@ export const DATASETS = {
     sample: {
       get: ["SEX", "SEX_LABEL", "FIRMNOPD"],
       for: "state:06",
+    },
+  },
+};
+
+export const VIEW_CONFIGS = {
+  income: {
+    name: "Household Income Tailwind",
+    datasets: { primary: "acs1", fallback: "acs5" },
+    variables: {
+      medianIncome: "B19013_001E",
+    },
+    geos: ["us", "state"],
+    years: ACS_YEARS,
+    sample: {
+      get: ["NAME", "B19013_001E"],
+      for: "state:06",
+    },
+  },
+  cost: {
+    name: "Cost-of-Living Signal",
+    datasets: { primary: "acs1", fallback: "acs5" },
+    variables: {
+      medianRent: "B25064_001E",
+    },
+    geos: ["state"],
+    years: [ACS_YEARS[0]],
+    sample: {
+      get: ["NAME", "B25064_001E"],
+      for: "state:*",
+    },
+  },
+  workstyle: {
+    name: "Remote/Commute Landscape",
+    datasets: { primary: "acs1", fallback: "acs5" },
+    variables: {
+      workersTotal: "B08006_001E",
+      workedFromHome: "B08006_017E",
+    },
+    geos: ["us", "state"],
+    years: ACS_YEARS,
+    sample: {
+      get: ["NAME", "B08006_001E", "B08006_017E"],
+      for: "state:06",
+    },
+  },
+  demand: {
+    name: "Customer Demographics: Movers & Builders",
+    datasets: { primary: "acs1", fallback: "acs5" },
+    variables: {
+      popTotal: "B01001_001E",
+      age25_29_m: "B01001_011E",
+      age30_34_m: "B01001_012E",
+      age25_29_f: "B01001_035E",
+      age30_34_f: "B01001_036E",
+      hhTotal: "B11005_001E",
+      hhWithKids: "B11005_002E",
+    },
+    geos: ["us", "state"],
+    years: [ACS_YEARS[0]],
+    sample: {
+      get: ["B01001_001E", "B01001_011E", "B01001_012E"],
+      for: "state:06",
+    },
+  },
+  housing: {
+    name: "New Neighborhoods = New Demand",
+    datasets: { primary: "acs1", fallback: "acs5" },
+    variables: {
+      totalUnits: "B25034_001E",
+      built2020: "B25034_002E",
+      built2010_2019: "B25034_003E",
+    },
+    geos: ["state"],
+    years: [ACS_YEARS[0]],
+    sample: {
+      get: ["NAME", "B25034_001E", "B25034_002E", "B25034_003E"],
+      for: "state:*",
     },
   },
 };
