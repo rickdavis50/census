@@ -1,3 +1,73 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Montserrat:wght@500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --zb-black: #111112;
+  --zb-white: #ffffff;
+  --zb-green: #33f28b;
+  --zb-blue: #3971e7;
+  --zb-moss: #59b36d;
+  --zb-ever: #40804e;
+  --zb-gray: #cecece;
+  --zb-warm: #f8f9f8;
+  --zb-water: #ebf1fd;
+  --zb-leaf: #ebfef3;
+
+  --zb-bg: var(--zb-black);
+  --zb-surface: rgba(255, 255, 255, 0.06);
+  --zb-surface-strong: rgba(255, 255, 255, 0.1);
+  --zb-subtle: rgba(255, 255, 255, 0.04);
+  --zb-border: rgba(255, 255, 255, 0.12);
+  --zb-ink: var(--zb-white);
+  --zb-ink-muted: rgba(255, 255, 255, 0.72);
+
+  --zb-radius-sm: 0.5rem;
+  --zb-radius-md: 0.75rem;
+  --zb-radius-lg: 1rem;
+
+  --zb-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --zb-shadow-2: 0 10px 30px rgba(0, 0, 0, 0.45);
+
+  --zb-space-1: 0.25rem;
+  --zb-space-2: 0.5rem;
+  --zb-space-3: 0.75rem;
+  --zb-space-4: 1rem;
+  --zb-space-5: 1.5rem;
+  --zb-space-6: 2rem;
+  --zb-space-7: 2.5rem;
+  --zb-space-8: 3rem;
+
+  --zb-font-display: "Montserrat";
+  --zb-font-ui: "Inter";
+
+  --zb-z-base: 0;
+  --zb-z-header: 10;
+  --zb-z-overlay: 50;
+
+  --zb-gradient-core: linear-gradient(90deg, var(--zb-green), var(--zb-blue));
+  --zb-gradient-tint: linear-gradient(90deg, var(--zb-leaf), var(--zb-water));
+  --zb-gradient-warm: linear-gradient(90deg, var(--zb-warm), var(--zb-gray));
+  --zb-gradient-gray: linear-gradient(90deg, var(--zb-gray), var(--zb-black));
+}
+
+@layer base {
+  * {
+    @apply box-border;
+  }
+
+  body {
+    @apply bg-zb-bg text-zb-ink font-ui;
+    margin: 0;
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display;
+  }
+}
