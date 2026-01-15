@@ -1,11 +1,3 @@
-const navItems = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "pages", label: "Pages" },
-  { id: "insights", label: "Insights" },
-  { id: "users", label: "Users" },
-  { id: "layout", label: "Layout" },
-];
-
 const Icon = ({ active }) => (
   <div
     className={[
@@ -26,29 +18,49 @@ const Icon = ({ active }) => (
   </div>
 );
 
-function Sidebar() {
+function Sidebar({ tabs, activeTab, onTabChange }) {
   return (
     <>
       <aside className="hidden flex-col gap-6 rounded-dash-lg border border-dash-border bg-dash-surface p-4 lg:flex">
         <div className="flex items-center justify-center rounded-full bg-dash-surface-2 p-3">
           <div className="h-8 w-8 rounded-full bg-dash-accent-3" />
         </div>
-        <nav className="flex flex-1 flex-col gap-4">
-          {navItems.map((item, index) => (
-            <div key={item.id} className="flex flex-col items-center gap-2">
-              <Icon active={index === 0} />
-              <span className="text-xs text-dash-muted">{item.label}</span>
-            </div>
-          ))}
-        </nav>
+        <div>
+          <p className="text-xs uppercase tracking-[0.32em] text-dash-muted">
+            Focus Area
+          </p>
+          <div className="mt-4 flex flex-col gap-3">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onTabChange(tab.id)}
+                className={[
+                  "flex items-center gap-3 rounded-dash-md border px-3 py-2 text-sm transition",
+                  tab.id === activeTab
+                    ? "border-dash-accent-3 bg-dash-surface-2 text-dash-ink"
+                    : "border-dash-border text-dash-muted hover:text-dash-ink",
+                ].join(" ")}
+              >
+                <Icon active={tab.id === activeTab} />
+                <span className="text-sm">{tab.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </aside>
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-dash-border bg-dash-bg-2 px-4 py-2 lg:hidden">
-        {navItems.map((item, index) => (
-          <div key={item.id} className="flex flex-col items-center gap-1">
-            <Icon active={index === 0} />
-            <span className="text-[10px] text-dash-muted">{item.label}</span>
-          </div>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onTabChange(tab.id)}
+            className="flex flex-col items-center gap-1"
+          >
+            <Icon active={tab.id === activeTab} />
+            <span className="text-[10px] text-dash-muted">{tab.label}</span>
+          </button>
         ))}
       </nav>
     </>
