@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
+import Select from "../components/Select";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { DATASETS, NONEMP_YEARS } from "../lib/datasets";
 import { getGeoLabel, getGeoParams } from "../lib/geography";
+import { fetchStateOptions } from "../lib/stateOptions";
 
 const MAX_ROWS = 10;
 
@@ -10,14 +12,48 @@ const isSectorCode = (code) => code.length === 2 && code !== "00";
 
 const formatNumber = (value) => Number(value).toLocaleString();
 
-function Growing({ geo }) {
+function Growing() {
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [rows, setRows] = useState([]);
+  const [options, setOptions] = useState([
+    { value: "us", label: "United States", type: "us" },
+  ]);
+  const [geoId, setGeoId] = useState("us");
 
-  const geoLabel = useMemo(() => getGeoLabel(geo), [geo]);
+  const selectedGeo = useMemo(() => {
+    if (geoId === "us") {
+      return { label: "United States", type: "us" };
+    }
+    return options.find((option) => option.value === geoId);
+  }, [geoId, options]);
+
+  const geoLabel = useMemo(() => getGeoLabel(selectedGeo), [selectedGeo]);
   const latestYear = NONEMP_YEARS[0];
   const earliestYear = NONEMP_YEARS[NONEMP_YEARS.length - 1];
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadOptions = async () => {
+      try {
+        const states = await fetchStateOptions();
+        if (!isActive) return;
+        setOptions([
+          { value: "us", label: "United States", type: "us" },
+          ...states,
+        ]);
+      } catch (err) {
+        return;
+      }
+    };
+
+    loadOptions();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -35,7 +71,7 @@ function Growing({ geo }) {
                 variables.label,
                 DATASETS.nonemp.variables.establishments,
               ],
-              ...getGeoParams(geo),
+              ...getGeoParams(selectedGeo),
             });
             const data = await cachedFetch(url, () => fetchJson(url));
             const rows = data
@@ -97,7 +133,7 @@ function Growing({ geo }) {
     return () => {
       isActive = false;
     };
-  }, [geo]);
+  }, [selectedGeo]);
 
   const maxPercent =
     rows.reduce((max, row) => Math.max(max, row.percent), 0) || 1;
@@ -111,6 +147,22 @@ function Growing({ geo }) {
         <p className="text-sm text-zb-ink-muted">
           3-year change in nonemployer establishments for {geoLabel}.
         </p>
+      </div>
+      <div className="max-w-xs">
+        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+          Geography
+        </p>
+        <Select
+          value={geoId}
+          onChange={(event) => setGeoId(event.target.value)}
+          className="mt-2"
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
       </div>
 
       {status === "loading" && (

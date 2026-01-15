@@ -1,22 +1,58 @@
 import { useEffect, useMemo, useState } from "react";
 import Badge from "../components/Badge";
 import Card from "../components/Card";
+import Select from "../components/Select";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { fetchAcsSeries } from "../lib/acsHelpers";
 import { ACS_YEARS, VIEW_CONFIGS } from "../lib/datasets";
 import { getGeoLabel, getGeoParams } from "../lib/geography";
+import { fetchStateOptions } from "../lib/stateOptions";
 
 const formatPercent = (value) => `${value.toFixed(1)}%`;
 
-function Workstyle({ geo }) {
+function Workstyle() {
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [series, setSeries] = useState([]);
   const [baseline, setBaseline] = useState(null);
   const [survey, setSurvey] = useState("");
+  const [options, setOptions] = useState([
+    { value: "us", label: "United States", type: "us" },
+  ]);
+  const [geoId, setGeoId] = useState("us");
 
-  const geoLabel = useMemo(() => getGeoLabel(geo), [geo]);
+  const selectedGeo = useMemo(() => {
+    if (geoId === "us") {
+      return { label: "United States", type: "us" };
+    }
+    return options.find((option) => option.value === geoId);
+  }, [geoId, options]);
+
+  const geoLabel = useMemo(() => getGeoLabel(selectedGeo), [selectedGeo]);
   const config = VIEW_CONFIGS.workstyle;
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadOptions = async () => {
+      try {
+        const states = await fetchStateOptions();
+        if (!isActive) return;
+        setOptions([
+          { value: "us", label: "United States", type: "us" },
+          ...states,
+        ]);
+      } catch (err) {
+        return;
+      }
+    };
+
+    loadOptions();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -31,7 +67,7 @@ function Workstyle({ geo }) {
             config.variables.workersTotal,
             config.variables.workedFromHome,
           ],
-          geoParams: getGeoParams(geo),
+          geoParams: getGeoParams(selectedGeo),
         });
 
         const rows = results.map((item) => {
@@ -83,7 +119,7 @@ function Workstyle({ geo }) {
     return () => {
       isActive = false;
     };
-  }, [geo, config.variables.workersTotal, config.variables.workedFromHome]);
+  }, [selectedGeo, config.variables.workersTotal, config.variables.workedFromHome]);
 
   const latest = series[0]?.share ?? 0;
   const baselineLabel =
@@ -103,6 +139,22 @@ function Workstyle({ geo }) {
           </p>
         </div>
         {baseline !== null && <Badge>{baselineLabel}</Badge>}
+      </div>
+      <div className="max-w-xs">
+        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+          Geography
+        </p>
+        <Select
+          value={geoId}
+          onChange={(event) => setGeoId(event.target.value)}
+          className="mt-2"
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
       </div>
 
       {status === "loading" && (

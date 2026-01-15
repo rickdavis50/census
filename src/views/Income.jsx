@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
+import Select from "../components/Select";
 import { fetchAcsSeries } from "../lib/acsHelpers";
 import { ACS_YEARS, VIEW_CONFIGS } from "../lib/datasets";
 import { getGeoLabel, getGeoParams } from "../lib/geography";
+import { fetchStateOptions } from "../lib/stateOptions";
 
 const formatCurrency = (value) =>
   Number(value).toLocaleString("en-US", {
@@ -16,9 +18,43 @@ function Income({ geo }) {
   const [error, setError] = useState("");
   const [series, setSeries] = useState([]);
   const [survey, setSurvey] = useState("");
+  const [options, setOptions] = useState([
+    { value: "us", label: "United States", type: "us" },
+  ]);
+  const [geoId, setGeoId] = useState("us");
 
-  const geoLabel = useMemo(() => getGeoLabel(geo), [geo]);
+  const selectedGeo = useMemo(() => {
+    if (geoId === "us") {
+      return { label: "United States", type: "us" };
+    }
+    return options.find((option) => option.value === geoId);
+  }, [geoId, options]);
+
+  const geoLabel = useMemo(() => getGeoLabel(selectedGeo), [selectedGeo]);
   const config = VIEW_CONFIGS.income;
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadOptions = async () => {
+      try {
+        const states = await fetchStateOptions();
+        if (!isActive) return;
+        setOptions([
+          { value: "us", label: "United States", type: "us" },
+          ...states,
+        ]);
+      } catch (err) {
+        return;
+      }
+    };
+
+    loadOptions();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -30,7 +66,7 @@ function Income({ geo }) {
         const { results, label } = await fetchAcsSeries({
           years: ACS_YEARS,
           variables: [config.variables.medianIncome],
-          geoParams: getGeoParams(geo),
+          geoParams: getGeoParams(selectedGeo),
         });
 
         const rows = results.map((item) => {
@@ -56,7 +92,7 @@ function Income({ geo }) {
     return () => {
       isActive = false;
     };
-  }, [geo, config.variables.medianIncome]);
+  }, [selectedGeo, config.variables.medianIncome]);
 
   const deltas = series.map((row, index) => {
     if (index === series.length - 1) return null;
@@ -73,6 +109,22 @@ function Income({ geo }) {
         <p className="text-sm text-zb-ink-muted">
           Median household income trend for {geoLabel}.
         </p>
+      </div>
+      <div className="max-w-xs">
+        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+          Geography
+        </p>
+        <Select
+          value={geoId}
+          onChange={(event) => setGeoId(event.target.value)}
+          className="mt-2"
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
       </div>
 
       {status === "loading" && (
@@ -98,12 +150,20 @@ function Income({ geo }) {
             <tbody className="divide-y divide-zb-border">
               {series.map((row, index) => {
                 const delta = deltas[index];
+                const prevValue = series[index + 1]?.value || 0;
+                const deltaPercent = prevValue
+                  ? (delta / prevValue) * 100
+                  : 0;
                 return (
                   <tr key={row.year} className="odd:bg-zb-surface">
                     <td className="px-4 py-3">{row.year}</td>
                     <td className="px-4 py-3">{formatCurrency(row.value)}</td>
                     <td className="px-4 py-3">
-                      {delta === null ? "—" : formatCurrency(delta)}
+                      {delta === null
+                        ? "—"
+                        : `${formatCurrency(delta)} (${deltaPercent.toFixed(
+                            1
+                          )}%)`}
                       {delta !== null && (
                         <div className="mt-2 h-1 w-full rounded-full bg-zb-subtle">
                           <div
