@@ -1,3 +1,4 @@
+// TODO: Add CBSA metro options once ACS/Nonemployer geo support is finalized.
 export const GEO_OPTIONS = [
   { id: "us", label: "United States", type: "us" },
   { id: "ca", label: "California", type: "state", fips: "06" },
