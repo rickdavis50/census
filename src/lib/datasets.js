@@ -57,6 +57,8 @@ export const VIEW_CONFIGS = {
   income: {
     name: "Household Income Tailwind",
     datasets: { primary: "acs1", fallback: "acs5" },
+    yearHandling: "Use ACS 1-year; fallback to ACS 5-year if unavailable.",
+    geoFormat: "for=us:1 or for=state:{FIPS}",
     variables: {
       medianIncome: "B19013_001E",
     },
@@ -70,6 +72,8 @@ export const VIEW_CONFIGS = {
   cost: {
     name: "Cost-of-Living Signal",
     datasets: { primary: "acs1", fallback: "acs5" },
+    yearHandling: "Use most recent ACS 1-year; fallback to ACS 5-year.",
+    geoFormat: "for=state:* (filtered to major states list)",
     variables: {
       medianRent: "B25064_001E",
     },
@@ -83,6 +87,8 @@ export const VIEW_CONFIGS = {
   workstyle: {
     name: "Remote/Commute Landscape",
     datasets: { primary: "acs1", fallback: "acs5" },
+    yearHandling: "Use 3-year ACS 1-year series; fallback to ACS 5-year.",
+    geoFormat: "for=us:1 or for=state:{FIPS}",
     variables: {
       workersTotal: "B08006_001E",
       workedFromHome: "B08006_017E",
@@ -97,6 +103,8 @@ export const VIEW_CONFIGS = {
   demand: {
     name: "Customer Demographics: Movers & Builders",
     datasets: { primary: "acs1", fallback: "acs5" },
+    yearHandling: "Use most recent ACS 1-year; fallback to ACS 5-year.",
+    geoFormat: "for=us:1 or for=state:{FIPS}",
     variables: {
       popTotal: "B01001_001E",
       age25_29_m: "B01001_011E",
@@ -116,6 +124,8 @@ export const VIEW_CONFIGS = {
   housing: {
     name: "New Neighborhoods = New Demand",
     datasets: { primary: "acs1", fallback: "acs5" },
+    yearHandling: "Use most recent ACS 1-year; fallback to ACS 5-year.",
+    geoFormat: "for=state:* (filtered to major states list)",
     variables: {
       totalUnits: "B25034_001E",
       built2020: "B25034_002E",

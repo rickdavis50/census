@@ -6,6 +6,14 @@ const surveyLabel = {
   acs5: "ACS 5-year",
 };
 
+const buildCacheKey = ({ survey, year, variables, geoParams }) => {
+  const geoPart = Object.entries(geoParams || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+  return `acs:${survey}:${year}:${variables.join("|")}:${geoPart}`;
+};
+
 export const fetchAcsSeries = async ({
   years,
   variables,
@@ -26,7 +34,16 @@ export const fetchAcsSeries = async ({
             get: ["NAME", ...variables],
             ...geoParams,
           });
-          const data = await cachedFetch(url, () => fetchJson(url));
+          const cacheKey = buildCacheKey({
+            survey,
+            year,
+            variables,
+            geoParams,
+          });
+          const data = await cachedFetch(cacheKey, () => fetchJson(url));
+          if (!Array.isArray(data) || data.length < 2) {
+            throw new Error("No ACS data returned.");
+          }
           return { year, data };
         })
       );
@@ -55,7 +72,16 @@ export const fetchAcsStates = async ({
         get: ["NAME", ...variables],
         for: "state:*",
       });
-      const data = await cachedFetch(url, () => fetchJson(url));
+      const cacheKey = buildCacheKey({
+        survey,
+        year,
+        variables,
+        geoParams: { for: "state:*" },
+      });
+      const data = await cachedFetch(cacheKey, () => fetchJson(url));
+      if (!Array.isArray(data) || data.length < 2) {
+        throw new Error("No ACS data returned.");
+      }
       return { survey, label: surveyLabel[survey], data };
     } catch (err) {
       if (survey === "acs5") throw err;
