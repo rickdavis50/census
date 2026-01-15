@@ -6,6 +6,11 @@ import { ACS_YEARS } from "./lib/datasets";
 import { GEO_OPTIONS, getGeoLabel } from "./lib/geography";
 import Density from "./views/Density";
 import Growing from "./views/Growing";
+import Income from "./views/Income";
+import Cost from "./views/Cost";
+import Workstyle from "./views/Workstyle";
+import DemographicDemand from "./views/DemographicDemand";
+import Housing from "./views/Housing";
 import Popular from "./views/Popular";
 
 function App() {
@@ -21,6 +26,11 @@ function App() {
     { id: "popular", label: "Popular" },
     { id: "growing", label: "Growing" },
     { id: "density", label: "Density" },
+    { id: "income", label: "Income" },
+    { id: "cost", label: "Cost" },
+    { id: "workstyle", label: "Workstyle" },
+    { id: "demand", label: "Demand" },
+    { id: "housing", label: "Housing" },
   ];
 
   const View = useMemo(() => {
@@ -31,10 +41,24 @@ function App() {
         return Growing;
       case "density":
         return Density;
+      case "income":
+        return Income;
+      case "cost":
+        return Cost;
+      case "workstyle":
+        return Workstyle;
+      case "demand":
+        return DemographicDemand;
+      case "housing":
+        return Housing;
       default:
         return Popular;
     }
   }, [activeTab]);
+
+  const showGeoSelector = ["growing", "income", "workstyle", "demand"].includes(
+    activeTab
+  );
 
   return (
     <div className="min-h-screen bg-zb-bg text-zb-ink">
@@ -56,7 +80,7 @@ function App() {
             </p>
             <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
           </div>
-          {activeTab === "growing" && (
+          {showGeoSelector && (
             <div className="w-full md:w-64">
               <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
                 Geography
