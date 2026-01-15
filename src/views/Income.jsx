@@ -167,7 +167,7 @@ function Income({ geo }) {
                       {delta !== null && (
                         <div className="mt-2 h-1 w-full rounded-full bg-zb-subtle">
                           <div
-                            className="h-1 rounded-full bg-zb-green"
+                            className="h-1 rounded-full bg-dash-accent-1"
                             style={{
                               width: `${(Math.abs(delta) / maxDelta) * 100}%`,
                             }}

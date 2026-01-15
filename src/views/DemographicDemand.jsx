@@ -171,7 +171,7 @@ function DemographicDemand() {
             </div>
             <div className="h-2 w-full rounded-full bg-zb-subtle">
               <div
-                className="h-2 rounded-full bg-zb-green"
+                className="h-2 rounded-full bg-dash-accent-1"
                 style={{ width: `${metrics.youngShare}%` }}
               />
             </div>
