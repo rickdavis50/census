@@ -140,7 +140,7 @@ function Popular() {
             Industry
           </p>
           <div className="rounded-zb-md border border-zb-border bg-zb-surface px-3 py-2 text-xs text-zb-ink-muted">
-            Based on {primaryState?.state ?? "selected"} rankings
+            * Based on column 1 state
           </div>
           <div className="space-y-3 pt-1">
             {anchorRows.map((row) => (
