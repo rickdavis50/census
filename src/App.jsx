@@ -1,61 +1,47 @@
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import Badge from "./components/Badge";
-import Card from "./components/Card";
-import StatRow from "./components/StatRow";
-
-const YEARS = [2023, 2022, 2021];
+import Select from "./components/Select";
+import Tabs from "./components/Tabs";
+import { ACS_YEARS } from "./lib/datasets";
+import { GEO_OPTIONS, getGeoLabel } from "./lib/geography";
+import Demographics from "./views/Demographics";
+import Density from "./views/Density";
+import Growing from "./views/Growing";
+import Momentum from "./views/Momentum";
+import Popular from "./views/Popular";
 
 function App() {
-  const [rows, setRows] = useState([]);
-  const [status, setStatus] = useState("loading");
-  const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState("momentum");
+  const [geoId, setGeoId] = useState("us");
 
-  useEffect(() => {
-    let isActive = true;
+  const geo = useMemo(
+    () => GEO_OPTIONS.find((option) => option.id === geoId),
+    [geoId]
+  );
 
-    const load = async () => {
-      setStatus("loading");
-      setError("");
+  const tabs = [
+    { id: "momentum", label: "Momentum" },
+    { id: "popular", label: "Popular" },
+    { id: "growing", label: "Growing" },
+    { id: "demographics", label: "Demographics" },
+    { id: "density", label: "Density" },
+  ];
 
-      try {
-        const results = await Promise.all(
-          YEARS.map(async (year) => {
-            const url = `https://api.census.gov/data/${year}/acs/acs1?get=NAME,B01001_001E&for=us:1`;
-            const response = await fetch(url);
-
-            if (!response.ok) {
-              throw new Error(`Request failed for ${year}`);
-            }
-
-            const data = await response.json();
-            const row = data[1];
-
-            if (!row) {
-              throw new Error(`No data for ${year}`);
-            }
-
-            return { year, population: row[1] };
-          })
-        );
-
-        if (!isActive) return;
-        setRows(results);
-        setStatus("success");
-      } catch (err) {
-        if (!isActive) return;
-        const message =
-          err instanceof Error ? err.message : "Failed to load data.";
-        setError(message);
-        setStatus("error");
-      }
-    };
-
-    load();
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
+  const View = useMemo(() => {
+    switch (activeTab) {
+      case "popular":
+        return Popular;
+      case "growing":
+        return Growing;
+      case "demographics":
+        return Demographics;
+      case "density":
+        return Density;
+      case "momentum":
+      default:
+        return Momentum;
+    }
+  }, [activeTab]);
 
   return (
     <div className="min-h-screen bg-zb-bg text-zb-ink">
@@ -65,57 +51,40 @@ function App() {
             <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
               Census Explorer
             </p>
-            <h1 className="text-2xl font-semibold">
-              U.S. Population (Last 3 Years)
-            </h1>
+            <h1 className="text-2xl font-semibold">Solopreneur Dashboards</h1>
           </div>
           <Badge>Data: U.S. Census</Badge>
         </header>
 
-        <Card className="space-y-6 p-6">
+        <div className="flex flex-col gap-4 rounded-zb-lg border border-zb-border bg-zb-surface p-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-2">
-            <p className="text-sm text-zb-ink-muted">
-              ACS 1-Year Estimates for total population, national level.
+            <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+              Focus Area
             </p>
-            <div className="space-y-1">
-              <StatRow label="Dataset" value="ACS 1-Year" />
-              <StatRow label="Geography" value="United States" />
-            </div>
+            <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
           </div>
+          <div className="w-full md:w-64">
+            <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+              Geography
+            </p>
+            <Select
+              value={geoId}
+              onChange={(event) => setGeoId(event.target.value)}
+              className="mt-2"
+            >
+              {GEO_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-2 text-xs text-zb-ink-muted">
+              Viewing: {getGeoLabel(geo)}
+            </p>
+          </div>
+        </div>
 
-          {status === "loading" && (
-            <p className="text-sm text-zb-ink-muted">Loading data...</p>
-          )}
-
-          {status === "error" && (
-            <div className="rounded-zb-sm border border-zb-border bg-zb-subtle px-4 py-3 text-sm text-zb-ink">
-              Error loading data: {error}
-            </div>
-          )}
-
-          {status === "success" && (
-            <div className="overflow-hidden rounded-zb-md border border-zb-border">
-              <table className="w-full text-sm">
-                <thead className="bg-zb-surface-strong text-left text-zb-ink-muted">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Year</th>
-                    <th className="px-4 py-3 font-medium">Population</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zb-border">
-                  {rows.map((row) => (
-                    <tr key={row.year} className="odd:bg-zb-surface">
-                      <td className="px-4 py-3">{row.year}</td>
-                      <td className="px-4 py-3">
-                        {Number(row.population).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
+        <View geo={geo} yearRange={ACS_YEARS} />
       </div>
     </div>
   );
