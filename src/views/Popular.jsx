@@ -139,9 +139,6 @@ function Popular() {
           <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
             Industry
           </p>
-          <div className="rounded-zb-md border border-zb-border bg-zb-surface px-3 py-2 text-xs text-zb-ink-muted">
-            * Based on column 1 state
-          </div>
           <div className="space-y-3 pt-1">
             {anchorRows.map((row) => (
               <div key={row.code} className="text-xs">
