@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
+import DownloadButton from "../components/DownloadButton";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { DATASETS, NONEMP_YEARS } from "../lib/datasets";
 import { GEO_OPTIONS } from "../lib/geography";
@@ -102,6 +103,24 @@ function Density({ geo, yearRange }) {
         <p className="text-sm text-zb-ink-muted">
           Nonemployer firms per 10,000 residents across major states.
         </p>
+      </div>
+      <div className="flex items-center justify-end">
+        <DownloadButton
+          filename="density-index.csv"
+          headers={[
+            "State",
+            "Nonemployers",
+            "Population",
+            "Nonemployers per 10,000",
+          ]}
+          rows={rows.map((row) => [
+            row.name,
+            row.nonemp,
+            row.population,
+            row.per10k.toFixed(2),
+          ])}
+          disabled={status !== "success"}
+        />
       </div>
 
       {status === "loading" && (

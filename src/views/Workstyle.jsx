@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Badge from "../components/Badge";
 import Card from "../components/Card";
 import Select from "../components/Select";
+import DownloadButton from "../components/DownloadButton";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { fetchAcsSeries } from "../lib/acsHelpers";
 import { ACS_YEARS, VIEW_CONFIGS } from "../lib/datasets";
@@ -140,21 +141,29 @@ function Workstyle() {
         </div>
         {baseline !== null && <Badge>{baselineLabel}</Badge>}
       </div>
-      <div className="max-w-xs">
-        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
-          Geography
-        </p>
-        <Select
-          value={geoId}
-          onChange={(event) => setGeoId(event.target.value)}
-          className="mt-2"
-        >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-xs">
+          <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+            Geography
+          </p>
+          <Select
+            value={geoId}
+            onChange={(event) => setGeoId(event.target.value)}
+            className="mt-2"
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <DownloadButton
+          filename={`workstyle-${geoId}.csv`}
+          headers={["Year", "Work from home share %"]}
+          rows={series.map((row) => [row.year, row.share.toFixed(2)])}
+          disabled={status !== "success"}
+        />
       </div>
 
       {status === "loading" && (

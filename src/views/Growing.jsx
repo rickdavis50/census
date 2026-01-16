@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
 import Select from "../components/Select";
+import DownloadButton from "../components/DownloadButton";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { DATASETS, NONEMP_YEARS } from "../lib/datasets";
 import { getGeoLabel, getGeoParams } from "../lib/geography";
@@ -148,21 +149,41 @@ function Growing() {
           3-year change in nonemployer establishments for {geoLabel}.
         </p>
       </div>
-      <div className="max-w-xs">
-        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
-          Geography
-        </p>
-        <Select
-          value={geoId}
-          onChange={(event) => setGeoId(event.target.value)}
-          className="mt-2"
-        >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-xs">
+          <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+            Geography
+          </p>
+          <Select
+            value={geoId}
+            onChange={(event) => setGeoId(event.target.value)}
+            className="mt-2"
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <DownloadButton
+          filename={`growing-${geoId}.csv`}
+          headers={[
+            "Industry",
+            `Establishments ${earliestYear}`,
+            `Establishments ${latestYear}`,
+            "Change",
+            "Change %",
+          ]}
+          rows={rows.map((row) => [
+            row.label,
+            row.start,
+            row.end,
+            row.delta,
+            row.percent.toFixed(2),
+          ])}
+          disabled={status !== "success"}
+        />
       </div>
 
       {status === "loading" && (

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
 import Select from "../components/Select";
+import DownloadButton from "../components/DownloadButton";
 import { buildUrl, cachedFetch, fetchJson } from "../lib/censusClient";
 import { DATASETS, NONEMP_YEARS } from "../lib/datasets";
 import { GEO_OPTIONS, getGeoParams } from "../lib/geography";
@@ -112,6 +113,30 @@ function Popular() {
         <p className="text-sm text-zb-ink-muted">
           Compare up to three states by nonemployer establishment counts.
         </p>
+      </div>
+      <div className="flex items-center justify-end">
+        <DownloadButton
+          filename="popular-head-to-head.csv"
+          headers={[
+            "Industry",
+            ...stateIds.map(
+              (stateId) =>
+                stateOptions.find((option) => option.id === stateId)?.label ||
+                stateId
+            ),
+          ]}
+          rows={anchorRows.map((row) => [
+            row.label,
+            ...stateIds.map((stateId) => {
+              const stateData = stateMap.get(stateId);
+              const match = stateData?.rows.find(
+                (item) => item.code === row.code
+              );
+              return match?.value ?? 0;
+            }),
+          ])}
+          disabled={status !== "success"}
+        />
       </div>
 
       <div className="grid gap-4">

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
+import DownloadButton from "../components/DownloadButton";
 import { fetchAcsStates } from "../lib/acsHelpers";
 import { ACS_YEARS, VIEW_CONFIGS } from "../lib/datasets";
 import { GEO_OPTIONS } from "../lib/geography";
@@ -86,6 +87,14 @@ function Housing() {
         <p className="text-sm text-zb-ink-muted">
           Share of housing units built since 2010 across major states.
         </p>
+      </div>
+      <div className="flex items-center justify-end">
+        <DownloadButton
+          filename="housing-growth.csv"
+          headers={["State", "Share built since 2010 %", "Label"]}
+          rows={rows.map((row) => [row.name, row.share.toFixed(2), row.growth])}
+          disabled={status !== "success"}
+        />
       </div>
 
       {status === "loading" && (

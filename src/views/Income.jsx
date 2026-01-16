@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
 import Select from "../components/Select";
+import DownloadButton from "../components/DownloadButton";
 import { fetchAcsSeries } from "../lib/acsHelpers";
 import { ACS_YEARS, VIEW_CONFIGS } from "../lib/datasets";
 import { getGeoLabel, getGeoParams } from "../lib/geography";
@@ -110,21 +111,39 @@ function Income({ geo }) {
           Median household income trend for {geoLabel}.
         </p>
       </div>
-      <div className="max-w-xs">
-        <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
-          Geography
-        </p>
-        <Select
-          value={geoId}
-          onChange={(event) => setGeoId(event.target.value)}
-          className="mt-2"
-        >
-          {options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-xs">
+          <p className="text-xs uppercase tracking-[0.2em] text-zb-ink-muted">
+            Geography
+          </p>
+          <Select
+            value={geoId}
+            onChange={(event) => setGeoId(event.target.value)}
+            className="mt-2"
+          >
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <DownloadButton
+          filename={`income-${geoId}.csv`}
+          headers={["Year", "Median income", "YoY change", "YoY change %"]}
+          rows={series.map((row, index) => {
+            const delta = deltas[index];
+            const prevValue = series[index + 1]?.value || 0;
+            const deltaPercent = prevValue ? (delta / prevValue) * 100 : 0;
+            return [
+              row.year,
+              row.value,
+              delta === null ? "" : delta,
+              delta === null ? "" : deltaPercent.toFixed(2),
+            ];
+          })}
+          disabled={status !== "success"}
+        />
       </div>
 
       {status === "loading" && (

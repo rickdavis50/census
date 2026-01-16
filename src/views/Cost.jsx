@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Card from "../components/Card";
+import DownloadButton from "../components/DownloadButton";
 import { fetchAcsStates } from "../lib/acsHelpers";
 import { ACS_YEARS, VIEW_CONFIGS } from "../lib/datasets";
 import { GEO_OPTIONS } from "../lib/geography";
@@ -89,6 +90,14 @@ function Cost() {
         <p className="text-sm text-zb-ink-muted">
           Median gross rent across major states with low/med/high markers.
         </p>
+      </div>
+      <div className="flex items-center justify-end">
+        <DownloadButton
+          filename="cost-of-living.csv"
+          headers={["State", "Median gross rent", "Signal"]}
+          rows={rows.map((row) => [row.name, row.value, row.signal])}
+          disabled={status !== "success"}
+        />
       </div>
 
       {status === "loading" && (
