@@ -2,6 +2,11 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## SBA API key
+If your SBA API access requires a key, set `VITE_SBA_API_KEY`.
+Create a `.env` file in the project root with `VITE_SBA_API_KEY=your_key`.
+Restart the dev server after adding or updating the variable.
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh

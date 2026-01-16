@@ -8,6 +8,7 @@ import Workstyle from "./views/Workstyle";
 import DemographicDemand from "./views/DemographicDemand";
 import Housing from "./views/Housing";
 import Popular from "./views/Popular";
+import LoanSize from "./views/LoanSize";
 import DashboardFrame from "./components/dashboard/DashboardFrame";
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
     { id: "density", label: "Density" },
     { id: "income", label: "Income" },
     { id: "cost", label: "Cost" },
+    { id: "loan-size", label: "Loan Size" },
     { id: "workstyle", label: "Workstyle" },
     { id: "demand", label: "Demand" },
     { id: "housing", label: "Housing" },
@@ -36,6 +38,8 @@ function App() {
         return Income;
       case "cost":
         return Cost;
+      case "loan-size":
+        return LoanSize;
       case "workstyle":
         return Workstyle;
       case "demand":
