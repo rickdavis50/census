@@ -2,10 +2,9 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## SBA API key
-If your SBA API access requires a key, set `VITE_SBA_API_KEY`.
-Create a `.env` file in the project root with `VITE_SBA_API_KEY=your_key`.
-Restart the dev server after adding or updating the variable.
+## SBA 7(a) data file
+Place `foia-7a-fy2020-present-asof-250930.csv` in `public/`.
+Restart the dev server after adding or updating the file.
 
 Currently, two official plugins are available:
 

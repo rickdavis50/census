@@ -1,6 +1,4 @@
-const SBA_7A_ENDPOINT = "https://api.sba.gov/loans/7a";
-const PAGE_SIZE = 1000;
-const MAX_PAGES = 50;
+const SBA_7A_CSV_URL = "/foia-7a-fy2020-present-asof-250930.csv";
 const CACHE = new Map();
 
 const NAICS_SECTOR_NAMES = {
@@ -30,74 +28,16 @@ const NAICS_SECTOR_NAMES = {
   92: "Public Administration",
 };
 
-const getApiKey = () => {
-  const key = import.meta.env?.VITE_SBA_API_KEY;
-  if (!key || typeof key !== "string") return "";
-  return key.trim();
-};
-
-const buildPageUrl = (page) => {
-  const url = new URL(SBA_7A_ENDPOINT);
-  url.searchParams.set("page", String(page));
-  url.searchParams.set("page_size", String(PAGE_SIZE));
-  url.searchParams.set("limit", String(PAGE_SIZE));
-  url.searchParams.set("offset", String((page - 1) * PAGE_SIZE));
-  return url.toString();
-};
-
-const fetchSbaJson = async (url, apiKey) => {
-  const headers = apiKey ? { "X-API-Key": apiKey } : undefined;
-  const response = await fetch(url, { headers });
+const fetchSbaCsv = async () => {
+  const response = await fetch(SBA_7A_CSV_URL);
   if (!response.ok) {
-    if ((response.status === 401 || response.status === 403) && !apiKey) {
-      throw new Error(
-        "Missing SBA API key. Add VITE_SBA_API_KEY to your environment."
-      );
-    }
-    throw new Error(`SBA request failed: ${response.status}`);
+    throw new Error(
+      response.status === 404
+        ? "SBA CSV not found. Ensure the FOIA CSV is in the public folder."
+        : `SBA CSV request failed: ${response.status}`
+    );
   }
-  return response.json();
-};
-
-const extractRecords = (payload) => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.results)) return payload.results;
-  if (Array.isArray(payload?.data)) return payload.data;
-  if (Array.isArray(payload?.items)) return payload.items;
-  return [];
-};
-
-const getNextUrl = (payload) => {
-  if (payload?.links?.next) return payload.links.next;
-  if (payload?.next) return payload.next;
-  if (payload?.pagination?.next) return payload.pagination.next;
-  return null;
-};
-
-const getFirstField = (record, keys) => {
-  for (const key of keys) {
-    if (record?.[key] !== undefined && record?.[key] !== null) {
-      return record[key];
-    }
-  }
-  return null;
-};
-
-const parseApprovalDate = (record) => {
-  const raw = getFirstField(record, [
-    "approval_date",
-    "ApprovalDate",
-    "Approval_Date",
-    "DateApproved",
-    "date_approved",
-  ]);
-  if (!raw) return null;
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return {
-    year: parsed.getUTCFullYear(),
-    month: parsed.getUTCMonth() + 1,
-  };
+  return response.text();
 };
 
 const parseNaicsSector = (value) => {
@@ -109,55 +49,134 @@ const parseNaicsSector = (value) => {
   return sector;
 };
 
-const parseLoanAmount = (record) => {
-  const raw = getFirstField(record, [
-    "loan_amount",
-    "LoanAmount",
-    "ApprovalAmount",
-    "approval_amount",
-    "GrossApproval",
-    "gross_approval",
-    "Gross_Approval",
-  ]);
+const parseLoanAmount = (value) => {
+  const raw = value;
   if (raw === null || raw === undefined || raw === "") return null;
   const amount = Number(raw);
   if (!Number.isFinite(amount) || amount <= 0) return null;
   return amount;
 };
 
-const aggregateBySector = (records) => {
-  const monthTracker = new Map();
-  const normalized = [];
+const parseCsvRows = (text, onRow) => {
+  let row = [];
+  let value = "";
+  let inQuotes = false;
 
-  records.forEach((record) => {
-    const approval = parseApprovalDate(record);
-    if (!approval) return;
+  const pushValue = () => {
+    row.push(value);
+    value = "";
+  };
 
-    const sector = parseNaicsSector(
-      getFirstField(record, ["naics_code", "NAICSCode", "NAICS", "naics"])
-    );
-    const amount = parseLoanAmount(record);
+  const pushRow = () => {
+    onRow(row);
+    row = [];
+  };
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '"') {
+      if (inQuotes && text[i + 1] === '"') {
+        value += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      pushValue();
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && text[i + 1] === "\n") {
+        i += 1;
+      }
+      pushValue();
+      pushRow();
+      continue;
+    }
+
+    value += char;
+  }
+
+  if (value.length || row.length) {
+    pushValue();
+    pushRow();
+  }
+};
+
+const parseApprovalDate = (value) => {
+  if (!value) return null;
+  const parts = String(value).split("/");
+  if (parts.length === 3) {
+    const month = Number(parts[0]);
+    const day = Number(parts[1]);
+    const year = Number(parts[2]);
+    if (
+      Number.isFinite(month) &&
+      Number.isFinite(day) &&
+      Number.isFinite(year)
+    ) {
+      return { year, month };
+    }
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return { year: parsed.getUTCFullYear(), month: parsed.getUTCMonth() + 1 };
+};
+
+const aggregateBySector = (text) => {
+  let headerMap = null;
+  const yearStats = new Map();
+
+  const ensureYear = (year) => {
+    if (!yearStats.has(year)) {
+      yearStats.set(year, { months: new Set(), sectors: new Map() });
+    }
+    return yearStats.get(year);
+  };
+
+  parseCsvRows(text, (row) => {
+    if (!headerMap) {
+      headerMap = new Map(row.map((key, index) => [key.trim(), index]));
+      return;
+    }
+
+    const program = row[headerMap.get("Program")]?.trim();
+    if (program !== "7A") return;
+
+    const approvalDate = row[headerMap.get("ApprovalDate")];
+    const approvalFy = Number(row[headerMap.get("ApprovalFY")]);
+    const approval = parseApprovalDate(approvalDate);
+    const year = Number.isFinite(approvalFy) ? approvalFy : approval?.year;
+    if (!year || !approval) return;
+
+    const sector = parseNaicsSector(row[headerMap.get("NAICSCode")]);
+    const amount = parseLoanAmount(row[headerMap.get("GrossApproval")]);
     if (!sector || !amount) return;
 
-    const months = monthTracker.get(approval.year) ?? new Set();
-    months.add(approval.month);
-    monthTracker.set(approval.year, months);
-
-    normalized.push({
-      year: approval.year,
+    const yearData = ensureYear(year);
+    yearData.months.add(approval.month);
+    const sectorData = yearData.sectors.get(sector) ?? {
       sector,
-      amount,
-    });
+      total: 0,
+      count: 0,
+    };
+    sectorData.total += amount;
+    sectorData.count += 1;
+    yearData.sectors.set(sector, sectorData);
   });
 
-  if (!normalized.length) {
+  if (!yearStats.size) {
     throw new Error("No SBA loan records matched the required fields.");
   }
 
-  const fullYears = Array.from(monthTracker.entries())
-    .filter(([, months]) => months.size === 12)
+  const fullYears = Array.from(yearStats.entries())
+    .filter(([, data]) => data.months.size === 12)
     .map(([year]) => year);
-  const availableYears = Array.from(monthTracker.keys());
+  const availableYears = Array.from(yearStats.keys());
   const targetYear =
     (fullYears.length ? Math.max(...fullYears) : Math.max(...availableYears)) ||
     null;
@@ -166,19 +185,7 @@ const aggregateBySector = (records) => {
     throw new Error("Unable to determine a valid SBA loan year.");
   }
 
-  const aggregates = new Map();
-  normalized.forEach((record) => {
-    if (record.year !== targetYear) return;
-    const current = aggregates.get(record.sector) ?? {
-      sector: record.sector,
-      total: 0,
-      count: 0,
-    };
-    current.total += record.amount;
-    current.count += 1;
-    aggregates.set(record.sector, current);
-  });
-
+  const aggregates = yearStats.get(targetYear)?.sectors ?? new Map();
   const rows = Array.from(aggregates.values())
     .filter((item) => item.count > 0)
     .map((item) => {
@@ -202,29 +209,8 @@ export const fetchSbaLoanSizeByNaics = async ({ forceRefresh = false } = {}) => 
     return CACHE.get(cacheKey);
   }
 
-  const apiKey = getApiKey();
-  let page = 1;
-  let nextUrl = buildPageUrl(page);
-  const records = [];
-
-  while (nextUrl && page <= MAX_PAGES) {
-    const payload = await fetchSbaJson(nextUrl, apiKey);
-    const batch = extractRecords(payload);
-    records.push(...batch);
-    const next = getNextUrl(payload);
-    if (next) {
-      nextUrl = next;
-      page += 1;
-      continue;
-    }
-    if (batch.length < PAGE_SIZE) break;
-    page += 1;
-    nextUrl = buildPageUrl(page);
-  }
-
-  const result = aggregateBySector(records);
+  const text = await fetchSbaCsv();
+  const result = aggregateBySector(text);
   CACHE.set(cacheKey, result);
   return result;
 };
-
-export const getSbaApiKeyStatus = () => Boolean(getApiKey());

@@ -136,7 +136,7 @@ function LoanSize() {
         <div className="space-y-1">
           <p className="text-xs text-zb-ink-muted">Year: {year}</p>
           <p className="text-xs text-zb-ink-muted">
-            Source: U.S. Small Business Administration (SBA) API — 7(a) loan
+            Source: U.S. Small Business Administration (SBA) FOIA 7(a) loan
             data
           </p>
         </div>
