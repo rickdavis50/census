@@ -1,4 +1,4 @@
-const SBA_7A_CSV_URL = "/foia-7a-fy2020-present-asof-250930.csv";
+const SBA_7A_CSV_URL = `${import.meta.env.BASE_URL}foia-7a-fy2020-present-asof-250930.csv`;
 const CACHE = new Map();
 
 const NAICS_SECTOR_NAMES = {
