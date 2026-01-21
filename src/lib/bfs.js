@@ -4,6 +4,7 @@ const BFS_MONTH_DATE_URL =
 const BFS_WEEKLY_STATE_URL =
   "https://www.census.gov/econ/bfs/csv/bfs_state_apps_weekly_nsa.csv";
 const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+const SECONDARY_PROXY = "https://cors.isomorphic-git.org/";
 
 const fetchCache = new Map();
 const parsedCache = {
@@ -150,20 +151,33 @@ const fetchCsv = async (url) => {
     }
     return response.text();
   };
-  try {
-    const text = await request(url);
-    fetchCache.set(url, text);
-    return text;
-  } catch (err) {
-    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+  const hostname =
+    typeof window !== "undefined" ? window.location.hostname : "";
+  const bypassDirect = hostname.endsWith("github.io");
+  const targets = [];
+  if (!bypassDirect) {
+    targets.push(url);
+  }
+  targets.push(
+    `${CORS_PROXY}${encodeURIComponent(url)}`,
+    `${SECONDARY_PROXY}${url}`
+  );
+  if (bypassDirect) {
+    targets.push(url);
+  }
+
+  let lastError = null;
+  for (const target of targets) {
     try {
-      const text = await request(proxyUrl);
+      const text = await request(target);
       fetchCache.set(url, text);
       return text;
-    } catch (proxyErr) {
-      throw err;
+    } catch (err) {
+      lastError = err;
     }
   }
+
+  throw lastError || new Error("BFS request failed.");
 };
 
 const parseMonthly = (monthlyText, dateText) => {
