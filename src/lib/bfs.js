@@ -3,6 +3,7 @@ const BFS_MONTH_DATE_URL =
   "https://www.census.gov/econ/bfs/csv/month_date_table.csv";
 const BFS_WEEKLY_STATE_URL =
   "https://www.census.gov/econ/bfs/csv/bfs_state_apps_weekly_nsa.csv";
+const CORS_PROXY = "https://api.allorigins.win/raw?url=";
 
 const fetchCache = new Map();
 const parsedCache = {
@@ -142,13 +143,27 @@ const buildMonthDateMap = (rows) => {
 
 const fetchCsv = async (url) => {
   if (fetchCache.has(url)) return fetchCache.get(url);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`BFS request failed: ${response.status}`);
+  const request = async (target) => {
+    const response = await fetch(target);
+    if (!response.ok) {
+      throw new Error(`BFS request failed: ${response.status}`);
+    }
+    return response.text();
+  };
+  try {
+    const text = await request(url);
+    fetchCache.set(url, text);
+    return text;
+  } catch (err) {
+    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+    try {
+      const text = await request(proxyUrl);
+      fetchCache.set(url, text);
+      return text;
+    } catch (proxyErr) {
+      throw err;
+    }
   }
-  const text = await response.text();
-  fetchCache.set(url, text);
-  return text;
 };
 
 const parseMonthly = (monthlyText, dateText) => {
