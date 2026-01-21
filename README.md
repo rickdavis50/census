@@ -2,9 +2,9 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## SBA 7(a) data file
-Place `foia-7a-fy2020-present-asof-250930.csv` in `public/`.
-Restart the dev server after adding or updating the file.
+## Business Formation Statistics (BFS)
+The BFS view pulls official Census CSV endpoints derived from IRS EIN (SS-4)
+applications. No local data files are required.
 
 Currently, two official plugins are available:
 
