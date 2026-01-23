@@ -5,6 +5,12 @@ const DEFAULT_OPTIONS = [10, 25, 50, "All"];
 const formatValueFallback = (value) =>
   Number(value ?? 0).toLocaleString("en-US");
 
+const truncateLabel = (label, max = 34) => {
+  const text = String(label ?? "");
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 1)).trim()}…`;
+};
+
 export const SbaChartSkeleton = () => (
   <div className="space-y-3 animate-pulse">
     <div className="h-4 w-40 rounded bg-zb-subtle" />
@@ -103,6 +109,7 @@ function SbaBarChart({
             const y = paddingY + index * rowHeight;
             const value = entry.value ?? 0;
             const barWidth = (value / maxValue) * barAreaWidth;
+            const displayLabel = truncateLabel(entry.label);
 
             return (
               <g key={`${entry.label}-${index}`} transform={`translate(12, ${y})`}>
@@ -112,7 +119,8 @@ function SbaBarChart({
                   fill="var(--zb-ink)"
                   fontSize="11"
                 >
-                  {entry.label}
+                  <title>{entry.label}</title>
+                  {displayLabel}
                 </text>
                 <rect
                   x={labelWidth}
