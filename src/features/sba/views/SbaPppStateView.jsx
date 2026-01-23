@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import Card from "../../components/Card";
-import Button from "../../components/Button";
+import Card from "../../../components/Card";
+import Button from "../../../components/Button";
 import SbaBarChart, { SbaChartSkeleton } from "../SbaBarChart";
 import { fetchSbaPppState } from "../adapters/sbaPppState";
 import {
