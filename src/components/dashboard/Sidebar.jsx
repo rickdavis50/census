@@ -1,8 +1,12 @@
-const Icon = ({ active }) => (
+const Icon = ({ active, isSba }) => (
   <div
     className={[
       "flex h-10 w-10 items-center justify-center rounded-full border",
-      active
+      isSba
+        ? active
+          ? "border-zb-blue/60 bg-zb-subtle text-zb-blue shadow-dash-sm"
+          : "border-zb-blue/30 text-zb-blue/70"
+        : active
         ? "border-dash-accent-3 bg-dash-surface-2 text-dash-accent-1 shadow-dash-sm"
         : "border-dash-border text-dash-muted",
     ].join(" ")}
@@ -29,39 +33,65 @@ function Sidebar({ tabs, activeTab, onTabChange }) {
           <p className="text-xs uppercase tracking-[0.32em] text-dash-muted">
             Focus Area
           </p>
-          <div className="mt-4 flex flex-col gap-3">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => onTabChange(tab.id)}
-                className={[
-                  "flex items-center gap-3 rounded-dash-md border px-3 py-2 text-sm transition",
-                  tab.id === activeTab
-                    ? "border-dash-accent-3 bg-dash-surface-2 text-dash-ink"
-                    : "border-dash-border text-dash-muted hover:text-dash-ink",
-                ].join(" ")}
-              >
-                <Icon active={tab.id === activeTab} />
-                <span className="text-sm">{tab.label}</span>
-              </button>
-            ))}
+          <div className="mt-4 flex max-h-[calc(100vh-260px)] flex-col gap-3 overflow-y-auto pr-1">
+            {tabs.map((tab) => {
+              const isActive = tab.id === activeTab;
+              const isSba = Boolean(tab.isSba);
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => onTabChange(tab.id)}
+                  className={[
+                    "relative flex items-center gap-3 rounded-dash-md border px-3 py-2 text-sm transition",
+                    isSba
+                      ? isActive
+                        ? "border-zb-blue/40 bg-zb-subtle text-zb-blue"
+                        : "border-zb-blue/20 text-zb-blue/70 hover:text-zb-blue"
+                      : isActive
+                      ? "border-dash-accent-3 bg-dash-surface-2 text-dash-ink"
+                      : "border-dash-border text-dash-muted hover:text-dash-ink",
+                  ].join(" ")}
+                >
+                  {isSba && isActive && (
+                    <span className="absolute left-0 top-2 h-[calc(100%-16px)] w-1 rounded-r-full bg-zb-blue" />
+                  )}
+                  <Icon active={isActive} isSba={isSba} />
+                  <span className="text-sm">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </aside>
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t border-dash-border bg-dash-bg-2 px-4 py-2 lg:hidden">
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onTabChange(tab.id)}
-            className="flex flex-col items-center gap-1"
-          >
-            <Icon active={tab.id === activeTab} />
-            <span className="text-[10px] text-dash-muted">{tab.label}</span>
-          </button>
-        ))}
+        {tabs.map((tab) => {
+          const isActive = tab.id === activeTab;
+          const isSba = Boolean(tab.isSba);
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onTabChange(tab.id)}
+              className="flex flex-col items-center gap-1"
+            >
+              <Icon active={isActive} isSba={isSba} />
+              <span
+                className={[
+                  "text-[10px]",
+                  isSba
+                    ? isActive
+                      ? "text-zb-blue"
+                      : "text-zb-blue/70"
+                    : "text-dash-muted",
+                ].join(" ")}
+              >
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
       </nav>
     </>
   );
