@@ -109,7 +109,12 @@ const normalizeJsonRows = (payload) => {
 };
 
 export const selectBestResource = (resources = []) => {
-  const scored = resources
+  const ranked = rankResources(resources);
+  return ranked.length ? ranked[0] : null;
+};
+
+export const rankResources = (resources = []) =>
+  resources
     .map((resource) => {
       const format = normalizeFormat(resource.format);
       const url = normalizeResourceUrl(resource);
@@ -119,6 +124,7 @@ export const selectBestResource = (resources = []) => {
       if (["json", "geojson"].includes(format)) score += 3;
       if (format === "csv") score += 2;
       if (!format) score += 1;
+      if (resource.datastore_active) score += 2;
       if (name.includes("data") || url.toLowerCase().includes("data")) score += 1;
       if (name.includes("documentation") || url.toLowerCase().includes("documentation")) {
         score -= 2;
@@ -126,10 +132,8 @@ export const selectBestResource = (resources = []) => {
 
       return { resource, score };
     })
-    .sort((a, b) => b.score - a.score);
-
-  return scored.length ? scored[0].resource : null;
-};
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.resource);
 
 const buildProxyUrl = (targetUrl) => {
   if (!PROXY_BASE_URL) return targetUrl;
@@ -173,9 +177,9 @@ export const discoverDataset = async ({ keywords, forceRefresh = false }) => {
     const results = await ckanSearch(keyword, { forceRefresh });
     for (const dataset of results) {
       const detailed = await ckanPackageShow(dataset.id, { forceRefresh });
-      const resource = selectBestResource(detailed?.resources ?? []);
-      if (resource) {
-        return { dataset: detailed, resource };
+      const resources = rankResources(detailed?.resources ?? []);
+      if (resources.length) {
+        return { dataset: detailed, resources };
       }
     }
   }

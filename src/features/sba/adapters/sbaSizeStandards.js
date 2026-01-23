@@ -73,89 +73,101 @@ const parseSizeValue = (value) => {
 export const fetchSbaSizeStandards = async ({ forceRefresh = false } = {}) => {
   const cacheKey = "sba-size-standards";
   const fetcher = async () => {
-    const { resource } = await discoverDataset({
+    const { resources } = await discoverDataset({
       keywords: KEYWORDS,
       forceRefresh,
     });
-    const rows = await fetchResource(resource);
-    if (!rows.length) {
-      throw new Error("SBA dataset returned no rows.");
-    }
+    let lastError = null;
 
-    const keys = Object.keys(rows[0]);
-    const naicsKey = findFieldKey(keys, NAICS_FIELDS);
-    const employeesKey = findFieldKey(keys, EMPLOYEE_FIELDS);
-    const receiptsKey = findFieldKey(keys, RECEIPTS_FIELDS);
-    const standardKey = findFieldKey(keys, STANDARD_FIELDS);
-    const measureKey = findFieldKey(keys, MEASURE_FIELDS);
+    const buildFromRows = (rows) => {
+      if (!rows.length) return null;
 
-    const grouped = new Map();
-    let hasEmployees = false;
-    let hasReceipts = false;
+      const keys = Object.keys(rows[0]);
+      const naicsKey = findFieldKey(keys, NAICS_FIELDS);
+      const employeesKey = findFieldKey(keys, EMPLOYEE_FIELDS);
+      const receiptsKey = findFieldKey(keys, RECEIPTS_FIELDS);
+      const standardKey = findFieldKey(keys, STANDARD_FIELDS);
+      const measureKey = findFieldKey(keys, MEASURE_FIELDS);
 
-    rows.forEach((row) => {
-      const naicsValue = naicsKey ? row[naicsKey] : null;
-      const sector = parseNaicsSector(naicsValue);
-      if (!sector) return;
+      const grouped = new Map();
+      let hasEmployees = false;
+      let hasReceipts = false;
 
-      let employees = null;
-      let receipts = null;
+      rows.forEach((row) => {
+        const naicsValue = naicsKey ? row[naicsKey] : null;
+        const sector = parseNaicsSector(naicsValue);
+        if (!sector) return;
 
-      if (employeesKey) {
-        employees = parseSizeValue(row[employeesKey]);
-      }
+        let employees = null;
+        let receipts = null;
 
-      if (receiptsKey) {
-        receipts = parseSizeValue(row[receiptsKey]);
-      }
+        if (employeesKey) {
+          employees = parseSizeValue(row[employeesKey]);
+        }
 
-      if (measureKey && standardKey) {
-        const measure = String(row[measureKey] ?? "").toLowerCase();
-        const standardValue = parseSizeValue(row[standardKey]);
-        if (standardValue !== null) {
-          if (measure.includes("employee")) {
-            employees = standardValue;
-          } else if (
-            measure.includes("receipt") ||
-            measure.includes("revenue") ||
-            measure.includes("dollar")
-          ) {
-            receipts = standardValue;
+        if (receiptsKey) {
+          receipts = parseSizeValue(row[receiptsKey]);
+        }
+
+        if (measureKey && standardKey) {
+          const measure = String(row[measureKey] ?? "").toLowerCase();
+          const standardValue = parseSizeValue(row[standardKey]);
+          if (standardValue !== null) {
+            if (measure.includes("employee")) {
+              employees = standardValue;
+            } else if (
+              measure.includes("receipt") ||
+              measure.includes("revenue") ||
+              measure.includes("dollar")
+            ) {
+              receipts = standardValue;
+            }
           }
         }
+
+        if (employees !== null) hasEmployees = true;
+        if (receipts !== null) hasReceipts = true;
+
+        const current = grouped.get(sector) ?? {
+          sector,
+          label: `${sector} — ${NAICS_SECTOR_NAMES[sector]}`,
+          employees: null,
+          receipts: null,
+        };
+
+        if (employees !== null) {
+          current.employees = Math.max(current.employees ?? 0, employees);
+        }
+        if (receipts !== null) {
+          current.receipts = Math.max(current.receipts ?? 0, receipts);
+        }
+
+        grouped.set(sector, current);
+      });
+
+      const rowsOut = Array.from(grouped.values()).filter(
+        (item) => item.employees !== null || item.receipts !== null
+      );
+
+      if (!rowsOut.length) return null;
+
+      rowsOut.sort((a, b) => a.sector.localeCompare(b.sector));
+
+      return { rows: rowsOut, hasEmployees, hasReceipts };
+    };
+
+    for (const resource of resources) {
+      try {
+        const rows = await fetchResource(resource);
+        const result = buildFromRows(rows);
+        if (result) return result;
+      } catch (error) {
+        lastError = error;
       }
-
-      if (employees !== null) hasEmployees = true;
-      if (receipts !== null) hasReceipts = true;
-
-      const current = grouped.get(sector) ?? {
-        sector,
-        label: `${sector} — ${NAICS_SECTOR_NAMES[sector]}`,
-        employees: null,
-        receipts: null,
-      };
-
-      if (employees !== null) {
-        current.employees = Math.max(current.employees ?? 0, employees);
-      }
-      if (receipts !== null) {
-        current.receipts = Math.max(current.receipts ?? 0, receipts);
-      }
-
-      grouped.set(sector, current);
-    });
-
-    const rowsOut = Array.from(grouped.values()).filter(
-      (item) => item.employees !== null || item.receipts !== null
-    );
-
-    if (!rowsOut.length) {
-      throw new Error("No SBA size standard records matched the required fields.");
     }
 
-    rowsOut.sort((a, b) => a.sector.localeCompare(b.sector));
-
-    return { rows: rowsOut, hasEmployees, hasReceipts };
+    if (lastError) throw lastError;
+    throw new Error("No SBA size standard records matched the required fields.");
   };
 
   if (forceRefresh) return fetcher();

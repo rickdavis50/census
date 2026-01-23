@@ -44,55 +44,69 @@ const normalizeState = (value) => {
 export const fetchSbaPppState = async ({ forceRefresh = false } = {}) => {
   const cacheKey = "sba-ppp-state";
   const fetcher = async () => {
-    const { resource } = await discoverDataset({
+    const { resources } = await discoverDataset({
       keywords: KEYWORDS,
       forceRefresh,
     });
-    const rows = await fetchResource(resource);
-    if (!rows.length) {
-      throw new Error("SBA dataset returned no rows.");
-    }
+    let lastError = null;
 
-    const keys = Object.keys(rows[0]);
-    const stateKey = findFieldKey(keys, STATE_FIELDS);
-    const amountKey = findFieldKey(keys, AMOUNT_FIELDS);
-    const countKey = findFieldKey(keys, COUNT_FIELDS);
+    const buildFromRows = (rows) => {
+      if (!rows.length) return null;
 
-    const grouped = new Map();
-    let hasAmount = false;
+      const keys = Object.keys(rows[0]);
+      const stateKey = findFieldKey(keys, STATE_FIELDS);
+      const amountKey = findFieldKey(keys, AMOUNT_FIELDS);
+      const countKey = findFieldKey(keys, COUNT_FIELDS);
 
-    rows.forEach((row) => {
-      const stateValue = normalizeState(stateKey ? row[stateKey] : "");
-      if (!stateValue) return;
+      const grouped = new Map();
+      let hasAmount = false;
 
-      const amount = parseNumber(amountKey ? row[amountKey] : null);
-      if (amount !== null) hasAmount = true;
+      rows.forEach((row) => {
+        const stateValue = normalizeState(stateKey ? row[stateKey] : "");
+        if (!stateValue) return;
 
-      let count = 1;
-      if (countKey) {
-        const parsedCount = parseNumber(row[countKey]);
-        if (Number.isFinite(parsedCount)) count = parsedCount;
+        const amount = parseNumber(amountKey ? row[amountKey] : null);
+        if (amount !== null) hasAmount = true;
+
+        let count = 1;
+        if (countKey) {
+          const parsedCount = parseNumber(row[countKey]);
+          if (Number.isFinite(parsedCount)) count = parsedCount;
+        }
+
+        const current = grouped.get(stateValue) ?? {
+          label: stateValue,
+          total: 0,
+          count: 0,
+        };
+
+        current.total += amount ?? 0;
+        current.count += count ?? 0;
+        grouped.set(stateValue, current);
+      });
+
+      const rowsOut = Array.from(grouped.values()).filter(
+        (item) => item.count > 0
+      );
+      if (!rowsOut.length) return null;
+
+      rowsOut.sort((a, b) => b.total - a.total);
+
+      return { rows: rowsOut, hasAmount };
+    };
+
+    for (const resource of resources) {
+      try {
+        const rows = await fetchResource(resource);
+        const result = buildFromRows(rows);
+        if (result) return result;
+      } catch (error) {
+        lastError = error;
       }
-
-      const current = grouped.get(stateValue) ?? {
-        label: stateValue,
-        total: 0,
-        count: 0,
-      };
-
-      current.total += amount ?? 0;
-      current.count += count ?? 0;
-      grouped.set(stateValue, current);
-    });
-
-    const rowsOut = Array.from(grouped.values()).filter((item) => item.count > 0);
-    if (!rowsOut.length) {
-      throw new Error("No SBA PPP records matched the required fields.");
     }
 
-    rowsOut.sort((a, b) => b.total - a.total);
-
-    return { rows: rowsOut, hasAmount };
+    if (lastError) throw lastError;
+    throw new Error("No SBA PPP records matched the required fields.");
   };
 
   if (forceRefresh) return fetcher();
