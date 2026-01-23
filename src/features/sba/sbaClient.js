@@ -1,4 +1,8 @@
-const CKAN_BASE_URL = "https://data.sba.gov/api/3/action";
+const SBA_BASE_URL = "https://data.sba.gov";
+const CKAN_BASE_URL = `${SBA_BASE_URL}/api/3/action`;
+const PROXY_BASE_URL = String(
+  import.meta.env.VITE_SBA_PROXY_URL ?? ""
+).trim().replace(/\/$/, "");
 const CACHE = new Map();
 
 export const getCached = async (key, fetcher) => {
@@ -127,11 +131,16 @@ export const selectBestResource = (resources = []) => {
   return scored.length ? scored[0].resource : null;
 };
 
+const buildProxyUrl = (targetUrl) => {
+  if (!PROXY_BASE_URL) return targetUrl;
+  return `${PROXY_BASE_URL}?url=${encodeURIComponent(targetUrl)}`;
+};
+
 export const ckanSearch = async (query, { forceRefresh = false } = {}) => {
   const key = `ckan-search:${query}`;
   const fetcher = async () => {
     const url = `${CKAN_BASE_URL}/package_search?q=${encodeURIComponent(query)}`;
-    const response = await fetch(url);
+    const response = await fetch(buildProxyUrl(url));
     if (!response.ok) {
       throw new Error(`SBA search failed (${response.status}).`);
     }
@@ -147,7 +156,7 @@ export const ckanPackageShow = async (id, { forceRefresh = false } = {}) => {
   const key = `ckan-package:${id}`;
   const fetcher = async () => {
     const url = `${CKAN_BASE_URL}/package_show?id=${encodeURIComponent(id)}`;
-    const response = await fetch(url);
+    const response = await fetch(buildProxyUrl(url));
     if (!response.ok) {
       throw new Error(`SBA package lookup failed (${response.status}).`);
     }
@@ -187,7 +196,7 @@ export const fetchResource = async (resource) => {
     url.endsWith(".json") ||
     url.endsWith(".geojson")
   ) {
-    const response = await fetch(url);
+    const response = await fetch(buildProxyUrl(url));
     if (!response.ok) {
       throw new Error(`SBA resource fetch failed (${response.status}).`);
     }
@@ -195,7 +204,7 @@ export const fetchResource = async (resource) => {
     return normalizeJsonRows(payload);
   }
 
-  const response = await fetch(url);
+  const response = await fetch(buildProxyUrl(url));
   if (!response.ok) {
     throw new Error(`SBA resource fetch failed (${response.status}).`);
   }
