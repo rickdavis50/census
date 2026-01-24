@@ -13,7 +13,6 @@ import BusinessFormation from "./views/BusinessFormation";
 import DashboardFrame from "./components/dashboard/DashboardFrame";
 import Sba7aVolumeView from "./features/sba/views/Sba7aVolumeView";
 import Sba504IndustryView from "./features/sba/views/Sba504IndustryView";
-import SbaDisasterTimeView from "./features/sba/views/SbaDisasterTimeView";
 import SbaSizeStandardsView from "./features/sba/views/SbaSizeStandardsView";
 
 function App() {
@@ -32,7 +31,6 @@ function App() {
     { id: "housing", label: "Housing" },
     { id: "sba-7a", label: "SBA 7(a) Loans — Volume", isSba: true },
     { id: "sba-504", label: "SBA 504 Loans — By Industry", isSba: true },
-    { id: "sba-disaster", label: "SBA Disaster Loans — Over Time", isSba: true },
     { id: "sba-size-standards", label: "SBA Size Standards — By NAICS", isSba: true },
   ];
 
@@ -62,8 +60,6 @@ function App() {
         return Sba7aVolumeView;
       case "sba-504":
         return Sba504IndustryView;
-      case "sba-disaster":
-        return SbaDisasterTimeView;
       case "sba-size-standards":
         return SbaSizeStandardsView;
       default:

@@ -31,8 +31,14 @@ export default {
       });
     }
 
-    if (targetUrl.hostname !== "data.sba.gov") {
-      return new Response("Only data.sba.gov is allowed", {
+    const allowedHosts = new Set([
+      "data.sba.gov",
+      "api.sba.gov",
+      "saedevadlsablob01.blob.core.windows.net",
+    ]);
+
+    if (!allowedHosts.has(targetUrl.hostname)) {
+      return new Response("Only SBA Open Data hosts are allowed", {
         status: 403,
         headers: { "Access-Control-Allow-Origin": "*" },
       });
