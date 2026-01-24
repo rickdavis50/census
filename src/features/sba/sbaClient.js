@@ -32,6 +32,29 @@ const normalizeResourceUrl = (resource) => {
   return url;
 };
 
+const fetchDatastoreRows = async (resourceId) => {
+  const limit = 10000;
+  let offset = 0;
+  const records = [];
+
+  while (true) {
+    const url = `${CKAN_BASE_URL}/datastore_search?resource_id=${encodeURIComponent(
+      resourceId
+    )}&limit=${limit}&offset=${offset}`;
+    const response = await fetch(buildProxyUrl(url));
+    if (!response.ok) {
+      throw new Error(`SBA datastore fetch failed (${response.status}).`);
+    }
+    const payload = await response.json();
+    const batch = payload?.result?.records ?? [];
+    records.push(...batch);
+    if (batch.length < limit) break;
+    offset += limit;
+  }
+
+  return records;
+};
+
 export const parseCsv = (text) => {
   const rows = [];
   let row = [];
@@ -191,6 +214,10 @@ export const fetchResource = async (resource) => {
   const url = normalizeResourceUrl(resource);
   if (!url) {
     throw new Error("SBA dataset resource URL missing.");
+  }
+
+  if (resource?.datastore_active && resource?.id) {
+    return fetchDatastoreRows(resource.id);
   }
 
   const format = normalizeFormat(resource.format);
