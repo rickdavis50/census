@@ -38,9 +38,14 @@ export default {
       "www2.census.gov",
       "api.census.gov",
     ]);
+    const hostname = targetUrl.hostname.toLowerCase();
+    const allowedHostSuffixes = [".sba.gov", ".census.gov"];
+    const isAllowed =
+      allowedHosts.has(hostname) ||
+      allowedHostSuffixes.some((suffix) => hostname.endsWith(suffix));
 
-    if (!allowedHosts.has(targetUrl.hostname)) {
-      return new Response("Only SBA Open Data hosts are allowed", {
+    if (!isAllowed) {
+      return new Response("Only SBA or Census hosts are allowed", {
         status: 403,
         headers: { "Access-Control-Allow-Origin": "*" },
       });
