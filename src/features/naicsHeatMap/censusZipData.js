@@ -12,6 +12,9 @@ const popCache = new Map();
 let latestSourcePromise = null;
 
 const censusApiKey = import.meta.env.VITE_CENSUS_API_KEY;
+const CENSUS_PROXY_URL = String(
+  import.meta.env.VITE_CENSUS_PROXY_URL ?? ""
+).trim().replace(/\/$/, "");
 
 const buildParams = (pairs) => {
   const params = new URLSearchParams(pairs);
@@ -24,6 +27,11 @@ const parseCensusArray = (payload) => {
   const headers = payload[0];
   const rows = payload.slice(1);
   return { headers, rows };
+};
+
+const buildProxyUrl = (targetUrl) => {
+  if (!CENSUS_PROXY_URL) return targetUrl;
+  return `${CENSUS_PROXY_URL}?url=${encodeURIComponent(targetUrl)}`;
 };
 
 const runWithConcurrency = async (items, limit, task) => {
@@ -63,7 +71,7 @@ const buildEstabUrl = ({ year, naics, zips, endpoint }) => {
 
 const fetchEstabBatch = async ({ year, endpoint, naics, zips }) => {
   const response = await fetch(
-    buildEstabUrl({ year, endpoint, naics, zips })
+    buildProxyUrl(buildEstabUrl({ year, endpoint, naics, zips }))
   );
   if (!response.ok) {
     throw new Error(`Establishment fetch failed (${response.status}).`);
@@ -92,34 +100,43 @@ const fetchEstabBatch = async ({ year, endpoint, naics, zips }) => {
   return batchMap;
 };
 
-const fetchPop = async (zip) => {
+const fetchPopBatch = async (zips) => {
   const params = buildParams({
     get: "B01003_001E",
-    for: `zip code tabulation area:${zip}`,
+    for: `zip code tabulation area:${zips.join(",")}`,
   });
   const url = `https://api.census.gov/data/${ACS_YEAR}/acs/acs5?${params}`;
-  const response = await fetch(url);
+  const response = await fetch(buildProxyUrl(url));
   if (!response.ok) {
     throw new Error(`Population fetch failed (${response.status}).`);
   }
   const data = await response.json();
   const parsed = parseCensusArray(data);
-  if (!parsed) return null;
+  if (!parsed) return new Map();
   const valueIndex = parsed.headers.indexOf("B01003_001E");
-  if (valueIndex === -1) return null;
-  const row = parsed.rows[0];
-  const value = Number(String(row?.[valueIndex] ?? "").trim());
-  return Number.isFinite(value) ? value : null;
+  const zipIndex = parsed.headers.indexOf("zip code tabulation area");
+  if (valueIndex === -1 || zipIndex === -1) return new Map();
+  const batchMap = new Map();
+  parsed.rows.forEach((row) => {
+    const zip = String(row?.[zipIndex] ?? "").trim();
+    const value = Number(String(row?.[valueIndex] ?? "").trim());
+    if (!zip) return;
+    batchMap.set(zip, Number.isFinite(value) ? value : 0);
+  });
+  zips.forEach((zip) => {
+    if (!batchMap.has(zip)) batchMap.set(zip, 0);
+  });
+  return batchMap;
 };
 
 const testCbpYear = async (year) => {
   const response = await fetch(
-    buildEstabUrl({
+    buildProxyUrl(buildEstabUrl({
       year,
       endpoint: "cbp",
       naics: DEFAULT_NAICS,
       zips: [TEST_ZIP],
-    })
+    }))
   );
   if (!response.ok) return false;
   const data = await response.json();
@@ -173,12 +190,13 @@ export const getPopulationByZip = async (zips) => {
   const missing = zips.filter((zip) => !popCache.has(zip));
   if (!missing.length) return popCache;
 
-  await runWithConcurrency(missing, POP_CONCURRENCY, async (zip) => {
+  const batches = chunk(missing, MAX_BATCH);
+  await runWithConcurrency(batches, POP_CONCURRENCY, async (batch) => {
     try {
-      const value = await fetchPop(zip);
-      popCache.set(zip, value ?? 0);
+      const batchMap = await fetchPopBatch(batch);
+      batchMap.forEach((value, zip) => popCache.set(zip, value));
     } catch (error) {
-      popCache.set(zip, 0);
+      batch.forEach((zip) => popCache.set(zip, 0));
     }
   });
 
