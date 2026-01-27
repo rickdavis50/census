@@ -35,6 +35,7 @@ export default {
       "data.sba.gov",
       "api.sba.gov",
       "saedevadlsablob01.blob.core.windows.net",
+      "www2.census.gov",
     ]);
 
     if (!allowedHosts.has(targetUrl.hostname)) {

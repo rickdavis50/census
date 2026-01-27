@@ -33,6 +33,9 @@ const DB_NAME = "census-cache";
 const DB_STORE = "keyval";
 const GAZETTEER_URL =
   "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2023_Gazetteer/2023_Gaz_zcta_national.zip";
+const CENSUS_PROXY_URL = String(
+  import.meta.env.VITE_CENSUS_PROXY_URL ?? ""
+).trim().replace(/\/$/, "");
 
 let centroidPromise = null;
 
@@ -175,6 +178,11 @@ const unzipGazetteer = (buffer) => {
   return strFromU8(entry);
 };
 
+const buildProxyUrl = (targetUrl) => {
+  if (!CENSUS_PROXY_URL) return targetUrl;
+  return `${CENSUS_PROXY_URL}?url=${encodeURIComponent(targetUrl)}`;
+};
+
 export const loadZipCentroids = async () => {
   if (centroidPromise) return centroidPromise;
 
@@ -182,7 +190,7 @@ export const loadZipCentroids = async () => {
     const cached = await loadCachedCentroids();
     if (cached?.length) return cached;
 
-    const response = await fetch(GAZETTEER_URL);
+    const response = await fetch(buildProxyUrl(GAZETTEER_URL));
     if (!response.ok) {
       throw new Error(`Failed to load ZIP centroids (${response.status}).`);
     }
