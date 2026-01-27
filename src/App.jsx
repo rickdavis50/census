@@ -11,6 +11,7 @@ import Popular from "./views/Popular";
 import LoanSize from "./views/LoanSize";
 import BusinessFormation from "./views/BusinessFormation";
 import DashboardFrame from "./components/dashboard/DashboardFrame";
+import NaicsHeatMapView from "./features/naicsHeatMap/NaicsHeatMapView";
 import Sba7aVolumeView from "./features/sba/views/Sba7aVolumeView";
 import Sba504IndustryView from "./features/sba/views/Sba504IndustryView";
 import SbaSizeStandardsView from "./features/sba/views/SbaSizeStandardsView";
@@ -29,6 +30,7 @@ function App() {
     { id: "workstyle", label: "Workstyle" },
     { id: "demand", label: "Demand" },
     { id: "housing", label: "Housing" },
+    { id: "naics-heatmap", label: "NAICS Heat Map" },
     { id: "sba-7a", label: "SBA 7(a) Loans — Volume", isSba: true },
     { id: "sba-504", label: "SBA 504 Loans — By Industry", isSba: true },
     { id: "sba-size-standards", label: "SBA Size Standards — By NAICS", isSba: true },
@@ -56,6 +58,8 @@ function App() {
         return DemographicDemand;
       case "housing":
         return Housing;
+      case "naics-heatmap":
+        return NaicsHeatMapView;
       case "sba-7a":
         return Sba7aVolumeView;
       case "sba-504":
