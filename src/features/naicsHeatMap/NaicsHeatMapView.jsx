@@ -7,13 +7,13 @@ import {
   DEFAULT_NAICS,
   NAICS_OPTIONS,
   getNaicsLabel,
-  loadZipCentroids,
+  loadStateCentroids,
   sanitizeNaics,
 } from "./naicsHeatMapData";
 import {
-  getEstablishmentsByZip,
-  getLatestEstabSource,
-  getPopulationByZip,
+  getEstablishmentsByState,
+  getLatestStateEstabSource,
+  getPopulationByState,
   getPopYear,
 } from "./censusZipData";
 
@@ -34,14 +34,14 @@ const formatCompact = (value) =>
     maximumFractionDigits: 1,
   });
 
-const buildTooltipHtml = ({ zip, naicsLabel, estab, pop, density }) => {
+const buildTooltipHtml = ({ stateName, naicsLabel, estab, pop, density }) => {
   const densityLine =
     pop && density ? `Density: ${formatNumber(density)} per 10k` : "Density: —";
   const popLine = pop ? `Population: ${formatNumber(pop)}` : "Population: —";
 
   return `
     <div style="font-size:12px;line-height:1.4">
-      <strong>ZIP ${zip}</strong><br/>
+      <strong>${stateName}</strong><br/>
       ${naicsLabel}<br/>
       Establishments: ${formatNumber(estab)}<br/>
       ${popLine}<br/>
@@ -116,7 +116,7 @@ function NaicsHeatMapView() {
   useEffect(() => {
     let isActive = true;
     setStatus("loading");
-    loadZipCentroids()
+    loadStateCentroids()
       .then((rows) => {
         if (!isActive) return;
         setCentroids(rows);
@@ -124,7 +124,7 @@ function NaicsHeatMapView() {
       })
       .catch((err) => {
         if (!isActive) return;
-        setError(err instanceof Error ? err.message : "Failed to load ZIP data.");
+        setError(err instanceof Error ? err.message : "Failed to load state data.");
         setStatus("error");
       });
 
@@ -153,18 +153,21 @@ function NaicsHeatMapView() {
   }, []);
 
   const buildFeatures = useCallback(
-    ({ zips, estabMap, popMap, metricKey }) => {
+    ({ states, estabMap, popMap, metricKey }) => {
       const features = [];
       let min = null;
       let max = null;
       let estabLoaded = 0;
       let popLoaded = 0;
 
-      zips.forEach((item) => {
-        const estab = estabMap.get(item.zip) ?? 0;
-        const pop = popMap?.get(item.zip) ?? 0;
+      states.forEach((item) => {
+        const estabEntry = estabMap.get(item.state);
+        const popEntry = popMap?.get(item.state);
+        const estab = estabEntry?.value ?? 0;
+        const pop = popEntry?.value ?? 0;
         const density = pop ? (estab / pop) * 10000 : null;
         const value = metricKey === "density" ? density : estab;
+        const stateName = item.name || estabEntry?.name || popEntry?.name || item.state;
 
         if (estab) estabLoaded += 1;
         if (pop) popLoaded += 1;
@@ -178,7 +181,8 @@ function NaicsHeatMapView() {
           type: "Feature",
           geometry: { type: "Point", coordinates: [item.lng, item.lat] },
           properties: {
-            zip: item.zip,
+            state: item.state,
+            stateName,
             estab,
             pop: pop || null,
             density,
@@ -222,31 +226,29 @@ function NaicsHeatMapView() {
 
     setStats((prev) => ({ ...prev, visible: visible.length }));
 
-    const { year, endpoint } = await getLatestEstabSource();
+    const { year, endpoint } = await getLatestStateEstabSource();
     setYearInfo({ year, endpoint });
 
-    const estabMap = await getEstablishmentsByZip({
+    const estabMap = await getEstablishmentsByState({
       year,
-      endpoint,
       naics,
-      zips: visible.map((item) => item.zip),
     });
 
     const popMap =
       metric === "density"
-        ? await getPopulationByZip(visible.map((v) => v.zip))
+        ? await getPopulationByState()
         : null;
 
     if (requestIdRef.current !== currentRequest) return;
 
     const densityResult = buildFeatures({
-      zips: visible,
+      states: visible,
       estabMap,
       popMap,
       metricKey: "density",
     });
     const estabResult = buildFeatures({
-      zips: visible,
+      states: visible,
       estabMap,
       popMap,
       metricKey: "estab",
@@ -334,9 +336,9 @@ function NaicsHeatMapView() {
       map.on("mousemove", "naics-circle", (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
-        const { zip, estab, pop, density, naicsLabel } = feature.properties;
+        const { stateName, estab, pop, density, naicsLabel } = feature.properties;
         const html = buildTooltipHtml({
-          zip,
+          stateName,
           naicsLabel,
           estab,
           pop,
@@ -385,7 +387,7 @@ function NaicsHeatMapView() {
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">NAICS Heat Map</h2>
         <p className="text-sm text-zb-ink-muted">
-          ZIP-level opportunity heat map for {effectiveNaicsLabel}.
+          State-level opportunity heat map for {effectiveNaicsLabel}.
         </p>
         <p className="text-xs text-zb-ink-muted">
           Green = opportunity (low density). Blue = saturated (high density).
@@ -487,9 +489,7 @@ function NaicsHeatMapView() {
           )}
         </div>
         <div className="space-y-1 text-right">
-          <p>
-            Visible ZIPs: {formatNumber(stats.visible)}
-          </p>
+          <p>Visible states: {formatNumber(stats.visible)}</p>
           <p>
             Establishments loaded: {formatNumber(stats.estabLoaded)}
           </p>

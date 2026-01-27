@@ -29,15 +29,18 @@ export const NAICS_OPTIONS = [
 export const DEFAULT_NAICS = "72";
 
 const CACHE_KEY = "naics-zip-centroids-v1";
+const STATE_CACHE_KEY = "naics-state-centroids-v1";
 const DB_NAME = "census-cache";
 const DB_STORE = "keyval";
 const GAZETTEER_URL =
   "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2023_Gazetteer/2023_Gaz_zcta_national.zip";
+const STATE_CENTROIDS_URL = "/state-centroids.json";
 const CENSUS_PROXY_URL = String(
   import.meta.env.VITE_CENSUS_PROXY_URL ?? ""
 ).trim().replace(/\/$/, "");
 
 let centroidPromise = null;
+let stateCentroidPromise = null;
 
 export const getNaicsLabel = (code) => {
   const match = NAICS_OPTIONS.find((option) => option.value === code);
@@ -111,6 +114,20 @@ const loadCachedCentroids = async () => {
   return null;
 };
 
+const loadCachedStateCentroids = async () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STATE_CACHE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (error) {
+    // Ignore localStorage failures.
+  }
+
+  const idbValue = await idbGet(STATE_CACHE_KEY);
+  if (idbValue) return idbValue;
+  return null;
+};
+
 const saveCachedCentroids = async (centroids) => {
   if (typeof window === "undefined") return;
   let stored = false;
@@ -123,6 +140,21 @@ const saveCachedCentroids = async (centroids) => {
 
   if (!stored) {
     await idbSet(CACHE_KEY, centroids);
+  }
+};
+
+const saveCachedStateCentroids = async (centroids) => {
+  if (typeof window === "undefined") return;
+  let stored = false;
+  try {
+    localStorage.setItem(STATE_CACHE_KEY, JSON.stringify(centroids));
+    stored = true;
+  } catch (error) {
+    stored = false;
+  }
+
+  if (!stored) {
+    await idbSet(STATE_CACHE_KEY, centroids);
   }
 };
 
@@ -207,4 +239,27 @@ export const loadZipCentroids = async () => {
   })();
 
   return centroidPromise;
+};
+
+export const loadStateCentroids = async () => {
+  if (stateCentroidPromise) return stateCentroidPromise;
+
+  stateCentroidPromise = (async () => {
+    const cached = await loadCachedStateCentroids();
+    if (cached?.length) return cached;
+
+    const response = await fetch(STATE_CENTROIDS_URL);
+    if (!response.ok) {
+      throw new Error(`Failed to load state centroids (${response.status}).`);
+    }
+    const data = await response.json();
+    if (!Array.isArray(data) || !data.length) {
+      throw new Error("Unable to parse state centroid data.");
+    }
+
+    await saveCachedStateCentroids(data);
+    return data;
+  })();
+
+  return stateCentroidPromise;
 };
