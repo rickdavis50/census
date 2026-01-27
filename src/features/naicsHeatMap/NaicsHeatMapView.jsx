@@ -21,6 +21,7 @@ const EMPTY_GEOJSON = {
   type: "FeatureCollection",
   features: [],
 };
+const MIN_HEATMAP_ZOOM = 5;
 
 const formatNumber = (value) =>
   Number(value ?? 0).toLocaleString("en-US", {
@@ -302,6 +303,7 @@ function NaicsHeatMapView() {
       style: "mapbox://styles/mapbox/dark-v11",
       center: [-98, 39],
       zoom: 3,
+      minZoom: MIN_HEATMAP_ZOOM,
       attributionControl: false,
     });
 
