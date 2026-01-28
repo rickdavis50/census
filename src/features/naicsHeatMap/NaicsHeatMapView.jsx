@@ -42,14 +42,19 @@ const calcEstabPer10k = (estab, pop) =>
 
 const log10p1 = (value) => Math.log10(Math.max(0, value) + 1);
 
-const buildTooltipHtml = ({ zip, categoryLabel, estab, pop, per10k, opp }) => `
+const buildTooltipHtml = ({
+  zip,
+  name,
+  categoryLabel,
+  per10k,
+  medianPer10k,
+  rating,
+}) => `
   <div style="font-size:12px;line-height:1.4">
-    <strong>ZIP ${zip}</strong><br/>
+    <strong>ZIP ${zip}${name ? ` • ${name}` : ""}</strong><br/>
     ${categoryLabel}<br/>
-    Establishments: ${formatNumber(estab)}<br/>
-    Population: ${formatNumber(pop)}<br/>
-    Establishments / 10k: ${formatNumber(per10k)}<br/>
-    Opportunity percentile: ${formatPercent(opp)}
+    Opportunity: ${rating}<br/>
+    ${formatNumber(per10k)} per 10k (Local median ${formatNumber(medianPer10k)})
   </div>
 `;
 
@@ -128,6 +133,29 @@ const buildLocalOppMap = (points, categoryId) => {
   return oppByZip;
 };
 
+const buildLocalMedianPer10k = (points, categoryId) => {
+  const per10kValues = [];
+  points.forEach((item) => {
+    const pop = item.p ?? 0;
+    if (pop < POP_FLOOR) return;
+    const est = item.e?.[categoryId] ?? 0;
+    const per10k = calcEstabPer10k(est, pop);
+    if (Number.isFinite(per10k)) per10kValues.push(per10k);
+  });
+  if (!per10kValues.length) return 0;
+  per10kValues.sort((a, b) => a - b);
+  const mid = Math.floor(per10kValues.length / 2);
+  return per10kValues.length % 2 === 0
+    ? (per10kValues[mid - 1] + per10kValues[mid]) / 2
+    : per10kValues[mid];
+};
+
+const classifyOpportunity = (value) => {
+  if (value >= 0.67) return "High";
+  if (value >= 0.33) return "Medium";
+  return "Low";
+};
+
 const blendOpportunity = (nationalOpp, stateOpp, localOpp, weights) =>
   Math.min(
     1,
@@ -153,7 +181,7 @@ function NaicsHeatMapView() {
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [legend, setLegend] = useState({ min: null, max: null });
+  const [legend, setLegend] = useState({ min: null, max: null, medianPer10k: 0 });
   const [stats, setStats] = useState({
     visible: 0,
     loaded: 0,
@@ -250,6 +278,7 @@ function NaicsHeatMapView() {
           geometry: { type: "Point", coordinates: [item.lon, item.lat] },
           properties: {
             zip: item.z,
+            name: item.n ?? "",
             estab,
             pop,
             per10k,
@@ -301,7 +330,12 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     const zoom = mapRef.current.getZoom();
     const weights = getBlendWeights(zoom);
     const localOppMap = buildLocalOppMap(visible, categoryId);
+    const localMedianPer10k = buildLocalMedianPer10k(visible, categoryId);
     const { features, min, max } = buildFeatures(visible, localOppMap, weights);
+    setLegend((prev) => ({
+      ...prev,
+      medianPer10k: localMedianPer10k,
+    }));
     applyGeoJson({ type: "FeatureCollection", features }, min, max);
     setLegend({ min, max });
     setStats({ visible: visible.length, loaded: loadedPointsRef.current.length });
@@ -351,6 +385,7 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     const zoom = map.getZoom();
     const weights = getBlendWeights(zoom);
     const localOppMap = buildLocalOppMap(nearbyRecords, categoryId);
+    const localMedianPer10k = buildLocalMedianPer10k(nearbyRecords, categoryId);
     const categoryIdx = categoryIndex.get(categoryId) ?? 0;
 
     const features = nearbyRecords.map((record) => {
@@ -361,15 +396,19 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
       const stateOpp = record.ps?.[categoryIdx] ?? nationalOpp;
       const localOpp = localOppMap.get(record.z) ?? nationalOpp;
       const opp = blendOpportunity(nationalOpp, stateOpp, localOpp, weights);
+      const rating = classifyOpportunity(opp);
       return {
         type: "Feature",
         geometry: { type: "Point", coordinates: [record.lon, record.lat] },
         properties: {
           zip: record.z,
+          name: record.n ?? "",
           estab,
           pop,
           per10k,
           opportunity: opp,
+          rating,
+          medianPer10k: localMedianPer10k,
           isTarget: targetRecord?.z === record.z,
         },
       };
@@ -462,6 +501,31 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
             0.95,
           ],
         },
+      });
+
+      map.on("click", "naics-points", (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const { zip, name, per10k, opportunity } = feature.properties;
+        const rating = classifyOpportunity(opportunity);
+        const medianPer10k = legend.medianPer10k ?? 0;
+        const html = buildTooltipHtml({
+          zip,
+          name,
+          categoryLabel: categoryLabelRef.current,
+          per10k,
+          medianPer10k,
+          rating,
+        });
+
+        if (!popupRef.current) {
+          popupRef.current = new mapboxgl.Popup({
+            closeButton: true,
+            closeOnClick: true,
+            offset: 12,
+          });
+        }
+        popupRef.current.setLngLat(event.lngLat).setHTML(html).addTo(map);
       });
 
       map.addLayer({

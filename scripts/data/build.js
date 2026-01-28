@@ -133,6 +133,7 @@ const parseZbpDetail = (text) => {
   const estabIndex =
     headers.indexOf("estab") !== -1 ? headers.indexOf("estab") : headers.indexOf("est");
   const stateIndex = headers.indexOf("stabbr");
+  const nameIndex = headers.indexOf("name");
 
   if (zipIndex === -1 || naicsIndex === -1 || estabIndex === -1) {
     throw new Error("ZBP headers missing ZIP/NAICS/ESTAB columns.");
@@ -141,12 +142,19 @@ const parseZbpDetail = (text) => {
   const matchers = buildCategoryMatchers();
   const byZip = new Map();
   const stateByZip = new Map();
+  const nameByZip = new Map();
 
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i];
     if (!line) continue;
     const row = parseDelimitedLine(line, delimiter);
     const zip = normalizeZip(row[zipIndex]);
+    if (nameIndex !== -1) {
+      const name = String(row[nameIndex] ?? "").trim();
+      if (name && !nameByZip.has(zip)) {
+        nameByZip.set(zip, name);
+      }
+    }
     if (stateIndex !== -1) {
       const state = String(row[stateIndex] ?? "").trim();
       if (state && !stateByZip.has(zip)) {
@@ -167,7 +175,7 @@ const parseZbpDetail = (text) => {
     entry.set(category, (entry.get(category) ?? 0) + estab);
   }
 
-  return { byZip, stateByZip };
+  return { byZip, stateByZip, nameByZip };
 };
 
 const parseGazetteerZcta = (text) => {
@@ -481,6 +489,7 @@ const buildOutput = async ({
   establishments,
   populations,
   stateByZip,
+  nameByZip,
   bandByZip,
   percentiles,
   densityMeta,
@@ -497,6 +506,7 @@ const buildOutput = async ({
     const estByCat = establishments.get(zip);
     const estObj = {};
     const state = stateByZip.get(zip) ?? null;
+    const name = nameByZip.get(zip) ?? null;
     const band = bandByZip.get(zip) ?? 0;
     const lowPop = pop < POP_FLOOR;
     const pn = new Array(categoryIds.length).fill(0);
@@ -535,6 +545,7 @@ const buildOutput = async ({
 
     const record = {
       z: zip,
+      n: name,
       lat: centroid.lat,
       lon: centroid.lon,
       p: pop,
@@ -654,7 +665,7 @@ const run = async () => {
     : await loadZipEntriesFromZip(zbpZipPath);
   const gazText = await loadZipEntriesFromZip(gazetteerZipPath);
 
-  const { byZip: establishments, stateByZip } = parseZbpDetail(zbpText);
+  const { byZip: establishments, stateByZip, nameByZip } = parseZbpDetail(zbpText);
   const centroids = parseGazetteerZcta(gazText);
   const densityMeta = buildDensityBands(centroids, populations);
   const percentiles = buildPercentileTables({
@@ -674,6 +685,7 @@ const run = async () => {
     establishments,
     populations,
     stateByZip,
+    nameByZip,
     bandByZip: densityMeta.bandByZip,
     percentiles,
     densityMeta,
