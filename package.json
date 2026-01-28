@@ -8,6 +8,8 @@
     "build": "vite build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
+    "data:build": "node scripts/data/build.js",
+    "data:clean": "node scripts/data/clean.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },

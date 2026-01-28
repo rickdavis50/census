@@ -4,24 +4,25 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import Card from "../../components/Card";
 import Button from "../../components/Button";
 import {
-  DEFAULT_NAICS,
-  NAICS_OPTIONS,
-  getNaicsLabel,
-  loadStateCentroids,
-  sanitizeNaics,
-} from "./naicsHeatMapData";
-import {
-  getEstablishmentsByState,
-  getLatestStateEstabSource,
-  getPopulationByState,
-  getPopYear,
-} from "./censusZipData";
+  bboxFromMap,
+  bboxIntersects,
+  getChunkIdForZip,
+  loadOpportunityChunk,
+  loadOpportunityIndex,
+  normalizeZip,
+} from "./opportunityData";
 
 const EMPTY_GEOJSON = {
   type: "FeatureCollection",
   features: [],
 };
-const MIN_HEATMAP_ZOOM = 5;
+
+const MIN_HEATMAP_ZOOM = 3;
+const NEARBY_BBOX_DEGREES = 0.5;
+const DENSE_POP_PER_SQMI = 3000;
+const DENSE_POP_FALLBACK = 50000;
+const OPP_EPS = 0.01;
+const OPP_MAX = 50;
 
 const formatNumber = (value) =>
   Number(value ?? 0).toLocaleString("en-US", {
@@ -34,97 +35,78 @@ const formatCompact = (value) =>
     maximumFractionDigits: 1,
   });
 
-const buildTooltipHtml = ({ stateName, naicsLabel, estab, pop, density }) => {
-  const densityLine =
-    pop && density ? `Density: ${formatNumber(density)} per 10k` : "Density: —";
-  const popLine = pop ? `Population: ${formatNumber(pop)}` : "Population: —";
+const calcEstabPer10k = (estab, pop) =>
+  pop > 0 ? (estab / pop) * 10000 : 0;
 
-  return `
-    <div style="font-size:12px;line-height:1.4">
-      <strong>${stateName}</strong><br/>
-      ${naicsLabel}<br/>
-      Establishments: ${formatNumber(estab)}<br/>
-      ${popLine}<br/>
-      ${densityLine}
-    </div>
-  `;
+const calcOpportunity = (estab, pop) => {
+  if (pop <= 0) return 0;
+  const per10k = calcEstabPer10k(estab, pop);
+  return 1 / Math.max(per10k, OPP_EPS);
 };
 
-const buildHeatmapPaint = (metricKey, maxValue) => ({
-  "heatmap-weight": [
-    "interpolate",
-    ["linear"],
-    ["coalesce", ["get", metricKey], 0],
-    0,
-    0,
-    maxValue || 1,
-    1,
-  ],
-  "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 10, 1.4],
-  "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 18, 10, 45],
-  "heatmap-opacity": 0.85,
-  "heatmap-color": [
-    "interpolate",
-    ["linear"],
-    ["heatmap-density"],
-    0,
-    "#33F28B",
-    0.5,
-    "#A8CFEA",
-    1,
-    "#EBF1FD",
-  ],
-});
+const buildTooltipHtml = ({ zip, categoryLabel, estab, pop, per10k, opp }) => `
+  <div style="font-size:12px;line-height:1.4">
+    <strong>ZIP ${zip}</strong><br/>
+    ${categoryLabel}<br/>
+    Establishments: ${formatNumber(estab)}<br/>
+    Population: ${formatNumber(pop)}<br/>
+    Establishments / 10k: ${formatNumber(per10k)}<br/>
+    Opportunity score: ${formatNumber(opp)}
+  </div>
+`;
 
-const buildCirclePaint = (metricKey, maxValue) => ({
-  "circle-color": "#EBF1FD",
-  "circle-opacity": 0.5,
-  "circle-radius": [
-    "interpolate",
-    ["linear"],
-    ["coalesce", ["get", metricKey], 0],
-    0,
-    3,
-    maxValue || 1,
-    8,
-  ],
-});
+const haversine = (a, b) => {
+  const toRad = (value) => (value * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinLat = Math.sin(dLat / 2) ** 2;
+  const sinLon = Math.sin(dLon / 2) ** 2;
+  const radius = 6371;
+  const h = sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon;
+  return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
+};
 
 function NaicsHeatMapView() {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const popupRef = useRef(null);
   const refreshTimerRef = useRef(null);
-  const requestIdRef = useRef(0);
+  const categoryLabelRef = useRef("");
 
-  const [centroids, setCentroids] = useState([]);
+  const loadedChunksRef = useRef(new Map());
+  const loadedPointsRef = useRef([]);
+
+  const [indexMeta, setIndexMeta] = useState(null);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
-  const [metric, setMetric] = useState("density");
-  const [naics, setNaics] = useState(DEFAULT_NAICS);
-  const [customNaics, setCustomNaics] = useState("");
-  const [yearInfo, setYearInfo] = useState(null);
+  const [categoryId, setCategoryId] = useState("");
   const [legend, setLegend] = useState({ min: null, max: null });
   const [stats, setStats] = useState({
     visible: 0,
-    estabLoaded: 0,
-    popLoaded: 0,
+    loaded: 0,
   });
+  const [zipQuery, setZipQuery] = useState("");
+  const [zipError, setZipError] = useState("");
+  const [nearbyRecords, setNearbyRecords] = useState([]);
+  const [targetRecord, setTargetRecord] = useState(null);
 
   const token = import.meta.env.VITE_MAPBOX_TOKEN;
 
   useEffect(() => {
     let isActive = true;
     setStatus("loading");
-    loadStateCentroids()
-      .then((rows) => {
+    loadOpportunityIndex()
+      .then((meta) => {
         if (!isActive) return;
-        setCentroids(rows);
+        setIndexMeta(meta);
+        setCategoryId(meta.categories?.[0]?.id ?? "");
         setStatus("ready");
       })
       .catch((err) => {
         if (!isActive) return;
-        setError(err instanceof Error ? err.message : "Failed to load state data.");
+        setError(err instanceof Error ? err.message : "Failed to load ZIP data.");
         setStatus("error");
       });
 
@@ -133,62 +115,62 @@ function NaicsHeatMapView() {
     };
   }, []);
 
-  const updateMapPaint = useCallback((metricKey, maxValue) => {
-    const map = mapRef.current;
-    if (!map) return;
-    if (map.getLayer("naics-heat")) {
-      map.setPaintProperty(
-        "naics-heat",
-        "heatmap-weight",
-        buildHeatmapPaint(metricKey, maxValue)["heatmap-weight"]
-      );
-    }
-    if (map.getLayer("naics-circle")) {
-      map.setPaintProperty(
-        "naics-circle",
-        "circle-radius",
-        buildCirclePaint(metricKey, maxValue)["circle-radius"]
-      );
-    }
+  const categoryLabel = useMemo(() => {
+    if (!indexMeta?.categories) return "";
+    return indexMeta.categories.find((cat) => cat.id === categoryId)?.label ?? "";
+  }, [categoryId, indexMeta]);
+
+  useEffect(() => {
+    categoryLabelRef.current = categoryLabel;
+  }, [categoryLabel]);
+
+  const ensureChunksLoaded = useCallback(async (chunkIds) => {
+    const missing = chunkIds.filter((id) => !loadedChunksRef.current.has(id));
+    if (!missing.length) return;
+
+    const payloads = await Promise.all(
+      missing.map(async (id) => ({ id, data: await loadOpportunityChunk(id) }))
+    );
+    payloads.forEach(({ id, data }) => {
+      loadedChunksRef.current.set(id, data);
+      loadedPointsRef.current = loadedPointsRef.current.concat(data);
+    });
   }, []);
 
+  const ensureChunksForBbox = useCallback(async (bbox) => {
+    if (!indexMeta?.chunks) return;
+    const needed = Object.entries(indexMeta.chunks)
+      .filter(([, chunk]) => bboxIntersects(bbox, chunk.bbox))
+      .map(([chunkId]) => chunkId);
+    await ensureChunksLoaded(needed);
+  }, [ensureChunksLoaded, indexMeta]);
+
   const buildFeatures = useCallback(
-    ({ states, estabMap, popMap, metricKey }) => {
+    (points) => {
       const features = [];
       let min = null;
       let max = null;
-      let estabLoaded = 0;
-      let popLoaded = 0;
 
-      states.forEach((item) => {
-        const estabEntry = estabMap.get(item.state);
-        const popEntry = popMap?.get(item.state);
-        const estab = estabEntry?.value ?? 0;
-        const pop = popEntry?.value ?? 0;
-        const density = pop ? (estab / pop) * 10000 : null;
-        const value = metricKey === "density" ? density : estab;
-        const stateName = item.name || estabEntry?.name || popEntry?.name || item.state;
+      points.forEach((item) => {
+        const estab = item.e?.[categoryId] ?? 0;
+        const pop = item.p ?? 0;
+        const per10k = calcEstabPer10k(estab, pop);
+        const opp = Math.min(calcOpportunity(estab, pop), OPP_MAX);
 
-        if (estab) estabLoaded += 1;
-        if (pop) popLoaded += 1;
-
-        if (value !== null) {
-          min = min === null ? value : Math.min(min, value);
-          max = max === null ? value : Math.max(max, value);
+        if (opp > 0) {
+          min = min === null ? opp : Math.min(min, opp);
+          max = max === null ? opp : Math.max(max, opp);
         }
 
         features.push({
           type: "Feature",
-          geometry: { type: "Point", coordinates: [item.lng, item.lat] },
+          geometry: { type: "Point", coordinates: [item.lon, item.lat] },
           properties: {
-            state: item.state,
-            stateName,
+            zip: item.z,
             estab,
-            pop: pop || null,
-            density,
-            metricValue: value ?? 0,
-            naics,
-            naicsLabel: getNaicsLabel(naics),
+            pop,
+            per10k,
+            opportunity: opp,
           },
         });
       });
@@ -197,90 +179,48 @@ function NaicsHeatMapView() {
         features,
         min,
         max,
-        estabLoaded,
-        popLoaded,
       };
     },
-    [naics]
+    [categoryId]
   );
 
-  const applyGeoJson = useCallback((geojson, metricKey, maxValue) => {
+  const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     const map = mapRef.current;
     if (!map) return;
     const source = map.getSource("naics-zip");
     if (source) {
       source.setData(geojson);
     }
-    updateMapPaint(metricKey, maxValue);
-  }, [updateMapPaint]);
+
+    if (map.getLayer("naics-heat")) {
+      map.setPaintProperty("naics-heat", "heatmap-weight", [
+        "interpolate",
+        ["linear"],
+        ["coalesce", ["get", "opportunity"], 0],
+        minValue ?? 0,
+        0,
+        maxValue ?? 1,
+        1,
+      ]);
+    }
+  }, []);
 
   const refreshData = useCallback(async () => {
-    if (!mapRef.current || !centroids.length) return;
-    const currentRequest = requestIdRef.current + 1;
-    requestIdRef.current = currentRequest;
+    if (!mapRef.current || !indexMeta) return;
 
     const bounds = mapRef.current.getBounds();
-    const visible = centroids.filter((item) =>
-      bounds.contains([item.lng, item.lat])
+    const bbox = bboxFromMap(bounds);
+    await ensureChunksForBbox(bbox);
+
+    const visible = loadedPointsRef.current.filter((item) =>
+      bounds.contains([item.lon, item.lat])
     );
 
-    setStats((prev) => ({ ...prev, visible: visible.length }));
-
-    const { year, endpoint } = await getLatestStateEstabSource();
-    setYearInfo({ year, endpoint });
-
-    const estabMap = await getEstablishmentsByState({
-      year,
-      naics,
-    });
-
-    const popMap =
-      metric === "density"
-        ? await getPopulationByState()
-        : null;
-
-    if (requestIdRef.current !== currentRequest) return;
-
-    const densityResult = buildFeatures({
-      states: visible,
-      estabMap,
-      popMap,
-      metricKey: "density",
-    });
-    const estabResult = buildFeatures({
-      states: visible,
-      estabMap,
-      popMap,
-      metricKey: "estab",
-    });
-
-    const usingDensity =
-      metric === "density" && densityResult.popLoaded > 0;
-    const result = usingDensity ? densityResult : estabResult;
-    const metricKey = usingDensity ? "density" : "estab";
-
-    applyGeoJson(
-      { type: "FeatureCollection", features: result.features },
-      metricKey,
-      result.max
-    );
-
-    setLegend({ min: result.min, max: result.max });
-    setStats({
-      visible: visible.length,
-      estabLoaded: result.estabLoaded,
-      popLoaded: densityResult.popLoaded,
-    });
-
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("NAICS map stats", {
-        visible: visible.length,
-        estabLoaded: result.estabLoaded,
-        popLoaded: densityResult.popLoaded,
-      });
-    }
-  }, [centroids, metric, naics, buildFeatures, applyGeoJson]);
+    const { features, min, max } = buildFeatures(visible);
+    applyGeoJson({ type: "FeatureCollection", features }, min, max);
+    setLegend({ min, max });
+    setStats({ visible: visible.length, loaded: loadedPointsRef.current.length });
+  }, [applyGeoJson, buildFeatures, ensureChunksForBbox, indexMeta]);
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimerRef.current) {
@@ -290,6 +230,56 @@ function NaicsHeatMapView() {
       refreshData();
     }, 400);
   }, [refreshData]);
+
+  const nearbyRows = useMemo(() => {
+    if (!nearbyRecords.length) return [];
+    return nearbyRecords.map((record) => {
+      const estab = record.e?.[categoryId] ?? 0;
+      const pop = record.p ?? 0;
+      const per10k = calcEstabPer10k(estab, pop);
+      const opp = Math.min(calcOpportunity(estab, pop), OPP_MAX);
+      return {
+        zip: record.z,
+        estab,
+        pop,
+        per10k,
+        opp,
+        distance: record.distance ?? 0,
+      };
+    });
+  }, [categoryId, nearbyRecords]);
+
+  const updateNearbyLayer = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource("nearby-zip");
+    if (!source) return;
+
+    const features = nearbyRecords.map((record) => {
+      const estab = record.e?.[categoryId] ?? 0;
+      const pop = record.p ?? 0;
+      const per10k = calcEstabPer10k(estab, pop);
+      const opp = Math.min(calcOpportunity(estab, pop), OPP_MAX);
+      return {
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [record.lon, record.lat] },
+        properties: {
+          zip: record.z,
+          estab,
+          pop,
+          per10k,
+          opportunity: opp,
+          isTarget: targetRecord?.z === record.z,
+        },
+      };
+    });
+
+    source.setData({ type: "FeatureCollection", features });
+  }, [categoryId, nearbyRecords, targetRecord]);
+
+  useEffect(() => {
+    updateNearbyLayer();
+  }, [updateNearbyLayer]);
 
   useEffect(() => {
     if (!token) {
@@ -317,32 +307,77 @@ function NaicsHeatMapView() {
         type: "geojson",
         data: EMPTY_GEOJSON,
       });
+      map.addSource("nearby-zip", {
+        type: "geojson",
+        data: EMPTY_GEOJSON,
+      });
 
       map.addLayer({
         id: "naics-heat",
         type: "heatmap",
         source: "naics-zip",
-        paint: buildHeatmapPaint("density", 1),
+        paint: {
+          "heatmap-weight": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "opportunity"], 0],
+            0,
+            0,
+            1,
+            1,
+          ],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.7, 8, 1.4],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 12, 8, 35],
+          "heatmap-opacity": 0.85,
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "#0A3E2F",
+            0.4,
+            "#2BAA7B",
+            0.7,
+            "#9FE7C1",
+            1,
+            "#F4FFF9",
+          ],
+        },
       });
 
       map.addLayer({
-        id: "naics-circle",
+        id: "nearby-zip-circle",
         type: "circle",
-        source: "naics-zip",
-        minzoom: 7,
-        paint: buildCirclePaint("density", 1),
+        source: "nearby-zip",
+        paint: {
+          "circle-radius": [
+            "case",
+            ["boolean", ["get", "isTarget"], false],
+            7,
+            5,
+          ],
+          "circle-color": [
+            "case",
+            ["boolean", ["get", "isTarget"], false],
+            "#FBBF24",
+            "#38BDF8",
+          ],
+          "circle-stroke-color": "#0F172A",
+          "circle-stroke-width": 1.5,
+        },
       });
 
-      map.on("mousemove", "naics-circle", (event) => {
+      map.on("mousemove", "nearby-zip-circle", (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
-        const { stateName, estab, pop, density, naicsLabel } = feature.properties;
+        const { zip, estab, pop, per10k, opportunity } = feature.properties;
         const html = buildTooltipHtml({
-          stateName,
-          naicsLabel,
+          zip,
+          categoryLabel: categoryLabelRef.current,
           estab,
           pop,
-          density,
+          per10k,
+          opp: opportunity,
         });
 
         if (!popupRef.current) {
@@ -355,7 +390,7 @@ function NaicsHeatMapView() {
         popupRef.current.setLngLat(event.lngLat).setHTML(html).addTo(map);
       });
 
-      map.on("mouseleave", "naics-circle", () => {
+      map.on("mouseleave", "nearby-zip-circle", () => {
         popupRef.current?.remove();
       });
 
@@ -368,30 +403,91 @@ function NaicsHeatMapView() {
       map.remove();
       mapRef.current = null;
     };
-  }, [token, scheduleRefresh]);
+  }, [scheduleRefresh, token]);
 
   useEffect(() => {
     scheduleRefresh();
-  }, [metric, naics, scheduleRefresh]);
+  }, [categoryId, scheduleRefresh]);
 
-  const effectiveNaicsLabel = useMemo(() => getNaicsLabel(naics), [naics]);
-  const isCustomValid = customNaics.length >= 2 && customNaics.length <= 6;
+  const handleZipSearch = useCallback(async () => {
+    const zip = normalizeZip(zipQuery);
+    if (!zip || zip.length !== 5) {
+      setZipError("Enter a 5-digit ZIP.");
+      return;
+    }
+    setZipError("");
 
-  const metricLabel = metric === "density" ? "Density (per 10k)" : "Establishments";
-  const densityPending = metric === "density" && stats.popLoaded === 0;
+    const chunkId = getChunkIdForZip(zip);
+    await ensureChunksLoaded([chunkId]);
+
+    const chunk = loadedChunksRef.current.get(chunkId) ?? [];
+    const record = chunk.find((item) => item.z === zip);
+    if (!record) {
+      setZipError("ZIP not found in dataset.");
+      return;
+    }
+
+    const bbox = [
+      record.lon - NEARBY_BBOX_DEGREES,
+      record.lat - NEARBY_BBOX_DEGREES,
+      record.lon + NEARBY_BBOX_DEGREES,
+      record.lat + NEARBY_BBOX_DEGREES,
+    ];
+
+    await ensureChunksForBbox(bbox);
+
+    const candidates = loadedPointsRef.current.filter(
+      (item) =>
+        item.lon >= bbox[0] &&
+        item.lon <= bbox[2] &&
+        item.lat >= bbox[1] &&
+        item.lat <= bbox[3]
+    );
+
+    const density =
+      record.a && record.a > 0 ? record.p / record.a : record.p;
+    // Deterministic density heuristic: denser ZIPs get a larger nearby list.
+    const isDense =
+      (record.a && record.a > 0 && density >= DENSE_POP_PER_SQMI) ||
+      record.p >= DENSE_POP_FALLBACK;
+    const limit = isDense ? 10 : 4;
+
+    const neighbors = candidates
+      .filter((item) => item.z !== zip)
+      .map((item) => ({
+        ...item,
+        distance: haversine(
+          { lat: record.lat, lon: record.lon },
+          { lat: item.lat, lon: item.lon }
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, limit);
+
+    setTargetRecord(record);
+    setNearbyRecords([record, ...neighbors]);
+
+    mapRef.current?.flyTo({
+      center: [record.lon, record.lat],
+      zoom: 8,
+    });
+  }, [ensureChunksForBbox, ensureChunksLoaded, zipQuery]);
+
   const legendMin = legend.min ?? 0;
   const legendMax = legend.max ?? 0;
 
   return (
     <Card className="space-y-6 p-6">
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">NAICS Heat Map</h2>
+        <h2 className="text-lg font-semibold">NAICS Opportunity Heat Map</h2>
         <p className="text-sm text-zb-ink-muted">
-          State-level opportunity heat map for {effectiveNaicsLabel}.
+          ZIP-level opportunity heat map for {categoryLabel || "NAICS"}.
         </p>
-        <p className="text-xs text-zb-ink-muted">
-          Green = opportunity (low density). Blue = saturated (high density).
-        </p>
+        {indexMeta && (
+          <p className="text-xs text-zb-ink-muted">
+            Data: ZBP {indexMeta.zbpYear}, ACS {indexMeta.acsYear}
+          </p>
+        )}
       </div>
 
       {status === "error" && (
@@ -404,66 +500,49 @@ function NaicsHeatMapView() {
         <span className="uppercase tracking-[0.2em]">NAICS</span>
         <select
           className="rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
-          value={naics}
-          onChange={(event) => setNaics(event.target.value)}
+          value={categoryId}
+          onChange={(event) => setCategoryId(event.target.value)}
         >
-          {NAICS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
+          {indexMeta?.categories?.map((option) => (
+            <option key={option.id} value={option.id}>
               {option.label}
             </option>
           ))}
         </select>
-        <span className="text-xs text-zb-ink-muted">Custom:</span>
-        <input
-          className="w-28 rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
-          value={customNaics}
-          placeholder="2-6 digits"
-          onChange={(event) => setCustomNaics(sanitizeNaics(event.target.value))}
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            if (isCustomValid) {
-              setNaics(customNaics);
-            }
-          }}
-          disabled={!isCustomValid}
-        >
-          Apply
-        </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 text-xs text-zb-ink-muted">
-        <span className="uppercase tracking-[0.2em]">Metric</span>
-        <Button
-          size="sm"
-          variant="secondary"
-          className={
-            metric === "density"
-              ? "border-zb-blue/60 bg-zb-subtle text-zb-blue"
-              : "border-zb-border text-zb-ink-muted"
-          }
-          onClick={() => setMetric("density")}
-        >
-          Density (per 10k)
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          className={
-            metric === "estab"
-              ? "border-zb-blue/60 bg-zb-subtle text-zb-blue"
-              : "border-zb-border text-zb-ink-muted"
-          }
-          onClick={() => setMetric("estab")}
-        >
-          Establishments
-        </Button>
-        {yearInfo && (
-          <span>
-            Year: {yearInfo.year} ({yearInfo.endpoint.toUpperCase()})
-          </span>
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-zb-ink-muted">
+          <span className="uppercase tracking-[0.2em]">ZIP Search</span>
+          <input
+            className="w-28 rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
+            value={zipQuery}
+            placeholder="e.g. 94107"
+            onChange={(event) => setZipQuery(event.target.value)}
+          />
+          <Button size="sm" variant="secondary" onClick={handleZipSearch}>
+            Go
+          </Button>
+          {zipError && <span className="text-xs text-zb-rose">{zipError}</span>}
+        </div>
+        {nearbyRows.length > 0 && (
+          <div className="rounded-zb-sm border border-zb-border bg-zb-subtle px-3 py-2 text-xs text-zb-ink">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-zb-ink-muted">
+              Nearby ZIPs
+            </p>
+            <div className="mt-2 grid gap-1">
+              {nearbyRows.map((row) => (
+                <div key={row.zip} className="flex items-center justify-between">
+                  <span>
+                    {row.zip} • {formatCompact(row.distance)} km
+                  </span>
+                  <span>
+                    Opp {formatCompact(row.opp)} · {formatCompact(row.per10k)} /10k
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
@@ -473,30 +552,26 @@ function NaicsHeatMapView() {
 
       <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-zb-ink-muted">
         <div className="space-y-2">
-          <p className="uppercase tracking-[0.2em]">Legend</p>
-          <div className="h-2 w-48 rounded-full" style={{
-            background: "linear-gradient(90deg, #33F28B 0%, #A8CFEA 50%, #EBF1FD 100%)",
-          }} />
+          <p className="uppercase tracking-[0.2em]">Opportunity</p>
+          <div
+            className="h-2 w-48 rounded-full"
+            style={{
+              background:
+                "linear-gradient(90deg, #0A3E2F 0%, #2BAA7B 45%, #9FE7C1 70%, #F4FFF9 100%)",
+            }}
+          />
           <div className="flex items-center justify-between text-[11px] text-zb-ink-muted">
             <span>{formatCompact(legendMin)}</span>
             <span>{formatCompact(legendMax)}</span>
           </div>
-          <p className="text-[11px]">Green = opportunity (low density)</p>
-          {densityPending && (
-            <p className="text-[11px]">
-              Using raw establishments until population loads.
-            </p>
-          )}
+          <p className="text-[11px]">
+            Higher score = fewer establishments per 10k residents.
+          </p>
         </div>
         <div className="space-y-1 text-right">
-          <p>Visible states: {formatNumber(stats.visible)}</p>
-          <p>
-            Establishments loaded: {formatNumber(stats.estabLoaded)}
-          </p>
-          <p>
-            Population loaded: {formatNumber(stats.popLoaded)} (ACS {getPopYear()})
-          </p>
-          <p>Metric: {metricLabel}</p>
+          <p>Visible ZIPs: {formatNumber(stats.visible)}</p>
+          <p>Loaded ZIPs: {formatNumber(stats.loaded)}</p>
+          <p>Category: {categoryLabel || "—"}</p>
         </div>
       </div>
     </Card>
