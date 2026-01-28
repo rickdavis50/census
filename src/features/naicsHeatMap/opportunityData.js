@@ -10,6 +10,10 @@ const fetchJson = async (url) => {
   if (!response.ok) {
     throw new Error(`Failed to load ${url} (${response.status}).`);
   }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(`Unexpected response for ${url}. Did you run data:build?`);
+  }
   return response.json();
 };
 
