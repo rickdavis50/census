@@ -267,26 +267,25 @@ function NaicsHeatMapView() {
     [categoryId, categoryIndex]
   );
 
-  const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
-    const map = mapRef.current;
-    if (!map) return;
-    const source = map.getSource("naics-zip");
-    if (source) {
-      source.setData(geojson);
-    }
-
-    if (map.getLayer("naics-heat")) {
-      map.setPaintProperty("naics-heat", "heatmap-weight", [
-        "interpolate",
-        ["linear"],
-        ["coalesce", ["get", "opportunity"], 0],
-        minValue ?? 0,
-        0,
-        maxValue ?? 1,
-        1,
-      ]);
-    }
-  }, []);
+const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
+  const map = mapRef.current;
+  if (!map) return;
+  const source = map.getSource("naics-zip");
+  if (source) {
+    source.setData(geojson);
+  }
+  if (map.getLayer("naics-points")) {
+    map.setPaintProperty("naics-points", "circle-opacity", [
+      "interpolate",
+      ["linear"],
+      ["coalesce", ["get", "opportunity"], 0],
+      minValue ?? 0,
+      0.45,
+      maxValue ?? 1,
+      0.95,
+    ]);
+  }
+}, []);
 
   const refreshData = useCallback(async () => {
     if (!mapRef.current || !indexMeta) return;
@@ -415,34 +414,52 @@ function NaicsHeatMapView() {
       });
 
       map.addLayer({
-        id: "naics-heat",
-        type: "heatmap",
+        id: "naics-points",
+        type: "circle",
         source: "naics-zip",
+        minzoom: MIN_HEATMAP_ZOOM,
+        filter: [
+          "all",
+          [">=", ["coalesce", ["get", "pop"], 0], POP_FLOOR],
+          [">", ["coalesce", ["get", "opportunity"], 0], 0],
+        ],
         paint: {
-          "heatmap-weight": [
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            3,
+            1.2,
+            6,
+            2.4,
+            9,
+            4,
+            12,
+            6.5,
+          ],
+          "circle-color": [
             "interpolate",
             ["linear"],
             ["coalesce", ["get", "opportunity"], 0],
             0,
-            0,
+            "#1F2E2B",
+            0.25,
+            "#23624C",
+            0.5,
+            "#2BAA7B",
+            0.75,
+            "#7BE7C1",
             1,
-            1,
+            "#E7FFF4",
           ],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 3, 0.7, 8, 1.4],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 3, 12, 8, 35],
-          "heatmap-opacity": 0.85,
-          "heatmap-color": [
+          "circle-opacity": [
             "interpolate",
             ["linear"],
-            ["heatmap-density"],
+            ["coalesce", ["get", "opportunity"], 0],
             0,
-            "#0A3E2F",
-            0.4,
-            "#2BAA7B",
-            0.7,
-            "#9FE7C1",
+            0.45,
             1,
-            "#F4FFF9",
+            0.95,
           ],
         },
       });
@@ -667,7 +684,7 @@ function NaicsHeatMapView() {
             <span>{formatPercent(legendMax)}</span>
           </div>
           <p className="text-[11px]">
-            Higher percentile = fewer establishments per 10k residents (normalized by density).
+            Colored points only (ZIPs with population ≥ {POP_FLOOR.toLocaleString()}).
           </p>
         </div>
         <div className="space-y-1 text-right">
