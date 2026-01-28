@@ -350,31 +350,6 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     }, 400);
   }, [refreshData]);
 
-  const nearbyRows = useMemo(() => {
-    if (!nearbyRecords.length) return [];
-    const zoom = mapRef.current?.getZoom() ?? 3;
-    const weights = getBlendWeights(zoom);
-    const localOppMap = buildLocalOppMap(nearbyRecords, categoryId);
-    const categoryIdx = categoryIndex.get(categoryId) ?? 0;
-
-    return nearbyRecords.map((record) => {
-      const estab = record.e?.[categoryId] ?? 0;
-      const pop = record.p ?? 0;
-      const per10k = calcEstabPer10k(estab, pop);
-      const nationalOpp = record.pn?.[categoryIdx] ?? 0;
-      const stateOpp = record.ps?.[categoryIdx] ?? nationalOpp;
-      const localOpp = localOppMap.get(record.z) ?? nationalOpp;
-      const opp = blendOpportunity(nationalOpp, stateOpp, localOpp, weights);
-      return {
-        zip: record.z,
-        estab,
-        pop,
-        per10k,
-        opp,
-        distance: record.distance ?? 0,
-      };
-    });
-  }, [categoryId, nearbyRecords, categoryIndex]);
 
   const updateNearbyLayer = useCallback(() => {
     const map = mapRef.current;
@@ -397,6 +372,7 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
       const localOpp = localOppMap.get(record.z) ?? nationalOpp;
       const opp = blendOpportunity(nationalOpp, stateOpp, localOpp, weights);
       const rating = classifyOpportunity(opp);
+      const oppLabel = `${Math.round(opp * 100)}%`;
       return {
         type: "Feature",
         geometry: { type: "Point", coordinates: [record.lon, record.lat] },
@@ -410,6 +386,8 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
           rating,
           medianPer10k: localMedianPer10k,
           isTarget: targetRecord?.z === record.z,
+          showLabel: targetRecord?.z !== record.z,
+          oppLabel,
         },
       };
     });
@@ -523,6 +501,7 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
             closeButton: true,
             closeOnClick: true,
             offset: 12,
+            className: "zb-popup",
           });
         }
         popupRef.current.setLngLat(event.lngLat).setHTML(html).addTo(map);
@@ -550,32 +529,50 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
         },
       });
 
-      map.on("mousemove", "nearby-zip-circle", (event) => {
+      map.addLayer({
+        id: "nearby-zip-label",
+        type: "symbol",
+        source: "nearby-zip",
+        layout: {
+          "text-field": ["get", "oppLabel"],
+          "text-size": 11,
+          "text-offset": [0, 1.1],
+          "text-anchor": "top",
+        },
+        paint: {
+          "text-color": "#E2E8F0",
+          "text-halo-color": "#0B1220",
+          "text-halo-width": 1.5,
+        },
+        filter: ["==", ["get", "showLabel"], true],
+      });
+
+      const handlePopup = (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
-        const { zip, estab, pop, per10k, opportunity } = feature.properties;
+        const { zip, name, per10k, opportunity, medianPer10k } = feature.properties;
+        const rating = classifyOpportunity(opportunity);
         const html = buildTooltipHtml({
           zip,
+          name,
           categoryLabel: categoryLabelRef.current,
-          estab,
-          pop,
           per10k,
-          opp: opportunity,
+          medianPer10k: medianPer10k ?? legend.medianPer10k ?? 0,
+          rating,
         });
 
         if (!popupRef.current) {
           popupRef.current = new mapboxgl.Popup({
-            closeButton: false,
-            closeOnClick: false,
+            closeButton: true,
+            closeOnClick: true,
             offset: 12,
+            className: "zb-popup",
           });
         }
         popupRef.current.setLngLat(event.lngLat).setHTML(html).addTo(map);
-      });
+      };
 
-      map.on("mouseleave", "nearby-zip-circle", () => {
-        popupRef.current?.remove();
-      });
+      map.on("click", "nearby-zip-circle", handlePopup);
 
       scheduleRefresh();
     });
@@ -708,25 +705,6 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
           </Button>
           {zipError && <span className="text-xs text-zb-rose">{zipError}</span>}
         </div>
-        {nearbyRows.length > 0 && (
-          <div className="rounded-zb-sm border border-zb-border bg-zb-subtle px-3 py-2 text-xs text-zb-ink">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-zb-ink-muted">
-              Nearby ZIPs
-            </p>
-            <div className="mt-2 grid gap-1">
-              {nearbyRows.map((row) => (
-                <div key={row.zip} className="flex items-center justify-between">
-                  <span>
-                    {row.zip} • {formatCompact(row.distance)} km
-                  </span>
-                  <span>
-                    Opp {formatPercent(row.opp)} · {formatCompact(row.per10k)} /10k
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="rounded-zb-md border border-zb-border bg-zb-subtle">
