@@ -21,8 +21,7 @@ const MIN_HEATMAP_ZOOM = 3;
 const NEARBY_BBOX_DEGREES = 0.5;
 const DENSE_POP_PER_SQMI = 3000;
 const DENSE_POP_FALLBACK = 50000;
-const OPP_EPS = 0.01;
-const OPP_MAX = 50;
+const POP_FLOOR = 1000;
 
 const formatNumber = (value) =>
   Number(value ?? 0).toLocaleString("en-US", {
@@ -35,14 +34,13 @@ const formatCompact = (value) =>
     maximumFractionDigits: 1,
   });
 
+const formatPercent = (value) =>
+  `${(Number(value ?? 0) * 100).toFixed(0)}%`;
+
 const calcEstabPer10k = (estab, pop) =>
   pop > 0 ? (estab / pop) * 10000 : 0;
 
-const calcOpportunity = (estab, pop) => {
-  if (pop <= 0) return 0;
-  const per10k = calcEstabPer10k(estab, pop);
-  return 1 / Math.max(per10k, OPP_EPS);
-};
+const log10p1 = (value) => Math.log10(Math.max(0, value) + 1);
 
 const buildTooltipHtml = ({ zip, categoryLabel, estab, pop, per10k, opp }) => `
   <div style="font-size:12px;line-height:1.4">
@@ -51,9 +49,31 @@ const buildTooltipHtml = ({ zip, categoryLabel, estab, pop, per10k, opp }) => `
     Establishments: ${formatNumber(estab)}<br/>
     Population: ${formatNumber(pop)}<br/>
     Establishments / 10k: ${formatNumber(per10k)}<br/>
-    Opportunity score: ${formatNumber(opp)}
+    Opportunity percentile: ${formatPercent(opp)}
   </div>
 `;
+
+const percentileRank = (sorted, value) => {
+  if (!sorted?.length || !Number.isFinite(value)) return null;
+  if (sorted.length === 1) return 0.5;
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo / (sorted.length - 1);
+};
+
+const getBlendWeights = (zoom) => {
+  if (zoom < 4) return { national: 0.7, state: 0.2, local: 0.1 };
+  if (zoom < 6) return { national: 0.4, state: 0.4, local: 0.2 };
+  return { national: 0.2, state: 0.3, local: 0.5 };
+};
 
 const haversine = (a, b) => {
   const toRad = (value) => (value * Math.PI) / 180;
@@ -67,6 +87,57 @@ const haversine = (a, b) => {
   const h = sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon;
   return 2 * radius * Math.asin(Math.min(1, Math.sqrt(h)));
 };
+
+const buildLocalOppMap = (points, categoryId) => {
+  const valuesByBand = new Map();
+  points.forEach((item) => {
+    const pop = item.p ?? 0;
+    if (pop < POP_FLOOR) return;
+    const est = item.e?.[categoryId] ?? 0;
+    const per10k = calcEstabPer10k(est, pop);
+    const value = log10p1(per10k);
+    const band = item.d ?? 0;
+    const bucket = valuesByBand.get(band) ?? [];
+    bucket.push(value);
+    valuesByBand.set(band, bucket);
+  });
+
+  const sortedByBand = new Map();
+  valuesByBand.forEach((bucket, band) => {
+    bucket.sort((a, b) => a - b);
+    sortedByBand.set(band, bucket);
+  });
+
+  const oppByZip = new Map();
+  points.forEach((item) => {
+    const pop = item.p ?? 0;
+    if (pop < POP_FLOOR) {
+      oppByZip.set(item.z, 0);
+      return;
+    }
+    const est = item.e?.[categoryId] ?? 0;
+    const per10k = calcEstabPer10k(est, pop);
+    const value = log10p1(per10k);
+    const band = item.d ?? 0;
+    const bucket = sortedByBand.get(band) ?? [];
+    const rank = percentileRank(bucket, value);
+    const opp = rank === null ? 0 : 1 - rank;
+    oppByZip.set(item.z, opp);
+  });
+
+  return oppByZip;
+};
+
+const blendOpportunity = (nationalOpp, stateOpp, localOpp, weights) =>
+  Math.min(
+    1,
+    Math.max(
+      0,
+      weights.national * nationalOpp +
+        weights.state * stateOpp +
+        weights.local * localOpp
+    )
+  );
 
 function NaicsHeatMapView() {
   const mapContainerRef = useRef(null);
@@ -120,6 +191,14 @@ function NaicsHeatMapView() {
     return indexMeta.categories.find((cat) => cat.id === categoryId)?.label ?? "";
   }, [categoryId, indexMeta]);
 
+  const categoryIndex = useMemo(() => {
+    const map = new Map();
+    indexMeta?.categories?.forEach((cat, idx) => {
+      map.set(cat.id, idx);
+    });
+    return map;
+  }, [indexMeta]);
+
   useEffect(() => {
     categoryLabelRef.current = categoryLabel;
   }, [categoryLabel]);
@@ -146,20 +225,24 @@ function NaicsHeatMapView() {
   }, [ensureChunksLoaded, indexMeta]);
 
   const buildFeatures = useCallback(
-    (points) => {
+    (points, localOppMap, weights) => {
       const features = [];
       let min = null;
       let max = null;
+      const categoryIdx = categoryIndex.get(categoryId) ?? 0;
 
       points.forEach((item) => {
         const estab = item.e?.[categoryId] ?? 0;
         const pop = item.p ?? 0;
         const per10k = calcEstabPer10k(estab, pop);
-        const opp = Math.min(calcOpportunity(estab, pop), OPP_MAX);
+        const nationalOpp = item.pn?.[categoryIdx] ?? 0;
+        const stateOpp = item.ps?.[categoryIdx] ?? nationalOpp;
+        const localOpp = localOppMap.get(item.z) ?? nationalOpp;
+        const blended = blendOpportunity(nationalOpp, stateOpp, localOpp, weights);
 
-        if (opp > 0) {
-          min = min === null ? opp : Math.min(min, opp);
-          max = max === null ? opp : Math.max(max, opp);
+        if (blended > 0) {
+          min = min === null ? blended : Math.min(min, blended);
+          max = max === null ? blended : Math.max(max, blended);
         }
 
         features.push({
@@ -170,7 +253,7 @@ function NaicsHeatMapView() {
             estab,
             pop,
             per10k,
-            opportunity: opp,
+            opportunity: blended,
           },
         });
       });
@@ -181,7 +264,7 @@ function NaicsHeatMapView() {
         max,
       };
     },
-    [categoryId]
+    [categoryId, categoryIndex]
   );
 
   const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
@@ -216,11 +299,14 @@ function NaicsHeatMapView() {
       bounds.contains([item.lon, item.lat])
     );
 
-    const { features, min, max } = buildFeatures(visible);
+    const zoom = mapRef.current.getZoom();
+    const weights = getBlendWeights(zoom);
+    const localOppMap = buildLocalOppMap(visible, categoryId);
+    const { features, min, max } = buildFeatures(visible, localOppMap, weights);
     applyGeoJson({ type: "FeatureCollection", features }, min, max);
     setLegend({ min, max });
     setStats({ visible: visible.length, loaded: loadedPointsRef.current.length });
-  }, [applyGeoJson, buildFeatures, ensureChunksForBbox, indexMeta]);
+  }, [applyGeoJson, buildFeatures, ensureChunksForBbox, indexMeta, categoryId]);
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimerRef.current) {
@@ -233,11 +319,19 @@ function NaicsHeatMapView() {
 
   const nearbyRows = useMemo(() => {
     if (!nearbyRecords.length) return [];
+    const zoom = mapRef.current?.getZoom() ?? 3;
+    const weights = getBlendWeights(zoom);
+    const localOppMap = buildLocalOppMap(nearbyRecords, categoryId);
+    const categoryIdx = categoryIndex.get(categoryId) ?? 0;
+
     return nearbyRecords.map((record) => {
       const estab = record.e?.[categoryId] ?? 0;
       const pop = record.p ?? 0;
       const per10k = calcEstabPer10k(estab, pop);
-      const opp = Math.min(calcOpportunity(estab, pop), OPP_MAX);
+      const nationalOpp = record.pn?.[categoryIdx] ?? 0;
+      const stateOpp = record.ps?.[categoryIdx] ?? nationalOpp;
+      const localOpp = localOppMap.get(record.z) ?? nationalOpp;
+      const opp = blendOpportunity(nationalOpp, stateOpp, localOpp, weights);
       return {
         zip: record.z,
         estab,
@@ -247,7 +341,7 @@ function NaicsHeatMapView() {
         distance: record.distance ?? 0,
       };
     });
-  }, [categoryId, nearbyRecords]);
+  }, [categoryId, nearbyRecords, categoryIndex]);
 
   const updateNearbyLayer = useCallback(() => {
     const map = mapRef.current;
@@ -255,11 +349,19 @@ function NaicsHeatMapView() {
     const source = map.getSource("nearby-zip");
     if (!source) return;
 
+    const zoom = map.getZoom();
+    const weights = getBlendWeights(zoom);
+    const localOppMap = buildLocalOppMap(nearbyRecords, categoryId);
+    const categoryIdx = categoryIndex.get(categoryId) ?? 0;
+
     const features = nearbyRecords.map((record) => {
       const estab = record.e?.[categoryId] ?? 0;
       const pop = record.p ?? 0;
       const per10k = calcEstabPer10k(estab, pop);
-      const opp = Math.min(calcOpportunity(estab, pop), OPP_MAX);
+      const nationalOpp = record.pn?.[categoryIdx] ?? 0;
+      const stateOpp = record.ps?.[categoryIdx] ?? nationalOpp;
+      const localOpp = localOppMap.get(record.z) ?? nationalOpp;
+      const opp = blendOpportunity(nationalOpp, stateOpp, localOpp, weights);
       return {
         type: "Feature",
         geometry: { type: "Point", coordinates: [record.lon, record.lat] },
@@ -275,7 +377,7 @@ function NaicsHeatMapView() {
     });
 
     source.setData({ type: "FeatureCollection", features });
-  }, [categoryId, nearbyRecords, targetRecord]);
+  }, [categoryId, nearbyRecords, targetRecord, categoryIndex]);
 
   useEffect(() => {
     updateNearbyLayer();
@@ -537,7 +639,7 @@ function NaicsHeatMapView() {
                     {row.zip} • {formatCompact(row.distance)} km
                   </span>
                   <span>
-                    Opp {formatCompact(row.opp)} · {formatCompact(row.per10k)} /10k
+                    Opp {formatPercent(row.opp)} · {formatCompact(row.per10k)} /10k
                   </span>
                 </div>
               ))}
@@ -561,11 +663,11 @@ function NaicsHeatMapView() {
             }}
           />
           <div className="flex items-center justify-between text-[11px] text-zb-ink-muted">
-            <span>{formatCompact(legendMin)}</span>
-            <span>{formatCompact(legendMax)}</span>
+            <span>{formatPercent(legendMin)}</span>
+            <span>{formatPercent(legendMax)}</span>
           </div>
           <p className="text-[11px]">
-            Higher score = fewer establishments per 10k residents.
+            Higher percentile = fewer establishments per 10k residents (normalized by density).
           </p>
         </div>
         <div className="space-y-1 text-right">

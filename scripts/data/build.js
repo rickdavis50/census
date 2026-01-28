@@ -24,8 +24,12 @@ import {
 
 const CURRENT_YEAR = new Date().getFullYear();
 const MIN_YEAR = 2015;
+const POP_FLOOR = 1000;
+const DENSITY_BANDS = 5;
+const MIN_STATE_SAMPLE = 50;
 
 const normalizeZip = (zip) => String(zip ?? "").trim().padStart(5, "0");
+const log10p1 = (value) => Math.log10(Math.max(0, value) + 1);
 
 const findLatestGazetteer = async () => {
   for (let year = CURRENT_YEAR; year >= MIN_YEAR; year -= 1) {
@@ -128,6 +132,7 @@ const parseZbpDetail = (text) => {
   const naicsIndex = headers.findIndex((value) => value.startsWith("naics"));
   const estabIndex =
     headers.indexOf("estab") !== -1 ? headers.indexOf("estab") : headers.indexOf("est");
+  const stateIndex = headers.indexOf("stabbr");
 
   if (zipIndex === -1 || naicsIndex === -1 || estabIndex === -1) {
     throw new Error("ZBP headers missing ZIP/NAICS/ESTAB columns.");
@@ -135,12 +140,19 @@ const parseZbpDetail = (text) => {
 
   const matchers = buildCategoryMatchers();
   const byZip = new Map();
+  const stateByZip = new Map();
 
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i];
     if (!line) continue;
     const row = parseDelimitedLine(line, delimiter);
     const zip = normalizeZip(row[zipIndex]);
+    if (stateIndex !== -1) {
+      const state = String(row[stateIndex] ?? "").trim();
+      if (state && !stateByZip.has(zip)) {
+        stateByZip.set(zip, state);
+      }
+    }
     const naics = row[naicsIndex];
     const category = mapNaicsToCategory(naics, matchers);
     if (!zip || !category) continue;
@@ -155,7 +167,7 @@ const parseZbpDetail = (text) => {
     entry.set(category, (entry.get(category) ?? 0) + estab);
   }
 
-  return byZip;
+  return { byZip, stateByZip };
 };
 
 const parseGazetteerZcta = (text) => {
@@ -348,6 +360,119 @@ const parseAcsSummaryPopulation = async (dataPath, geoPath) => {
 
   return byZip;
 };
+
+const percentileRank = (sorted, value) => {
+  if (!sorted?.length || !Number.isFinite(value)) return null;
+  if (sorted.length === 1) return 0.5;
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] < value) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo / (sorted.length - 1);
+};
+
+const buildDensityBands = (centroids, populations) => {
+  const densityLogs = [];
+  centroids.forEach((centroid, zip) => {
+    const pop = populations.get(zip) ?? 0;
+    if (!centroid.area || pop <= 0) return;
+    const density = pop / centroid.area;
+    if (Number.isFinite(density) && density > 0) {
+      densityLogs.push(log10p1(density));
+    }
+  });
+
+  densityLogs.sort((a, b) => a - b);
+  const quantile = (q) => {
+    if (!densityLogs.length) return 0;
+    const index = Math.floor(q * (densityLogs.length - 1));
+    return densityLogs[Math.max(0, Math.min(index, densityLogs.length - 1))];
+  };
+  const thresholds = [
+    quantile(0.2),
+    quantile(0.4),
+    quantile(0.6),
+    quantile(0.8),
+  ];
+  const median = quantile(0.5);
+
+  const bandByZip = new Map();
+  centroids.forEach((centroid, zip) => {
+    const pop = populations.get(zip) ?? 0;
+    const densityLog =
+      centroid.area && pop > 0 ? log10p1(pop / centroid.area) : median;
+    let band = thresholds.findIndex((threshold) => densityLog <= threshold);
+    if (band === -1) band = DENSITY_BANDS - 1;
+    bandByZip.set(zip, band);
+  });
+
+  return { thresholds, bandByZip };
+};
+
+const buildPercentileTables = ({
+  centroids,
+  populations,
+  establishments,
+  stateByZip,
+  bandByZip,
+  categoryIds,
+}) => {
+  const national = {};
+  categoryIds.forEach((id) => {
+    national[id] = Array.from({ length: DENSITY_BANDS }, () => []);
+  });
+
+  const stateTables = new Map();
+
+  const ensureState = (state) => {
+    if (!state) return null;
+    if (!stateTables.has(state)) {
+      const table = {};
+      categoryIds.forEach((id) => {
+        table[id] = Array.from({ length: DENSITY_BANDS }, () => []);
+      });
+      stateTables.set(state, table);
+    }
+    return stateTables.get(state);
+  };
+
+  centroids.forEach((_, zip) => {
+    const pop = populations.get(zip) ?? 0;
+    if (pop < POP_FLOOR) return;
+    const band = bandByZip.get(zip) ?? 0;
+    const estByCat = establishments.get(zip);
+    const state = stateByZip.get(zip) ?? null;
+    const stateTable = ensureState(state);
+
+    categoryIds.forEach((id) => {
+      const est = estByCat?.get(id) ?? 0;
+      const per10k = pop > 0 ? (est / pop) * 10000 : 0;
+      const value = log10p1(per10k);
+      national[id][band].push(value);
+      if (stateTable) {
+        stateTable[id][band].push(value);
+      }
+    });
+  });
+
+  categoryIds.forEach((id) => {
+    national[id].forEach((bucket) => bucket.sort((a, b) => a - b));
+  });
+
+  stateTables.forEach((table) => {
+    categoryIds.forEach((id) => {
+      table[id].forEach((bucket) => bucket.sort((a, b) => a - b));
+    });
+  });
+
+  return { national, stateTables };
+};
 const buildOutput = async ({
   zbpYear,
   acsYear,
@@ -355,17 +480,27 @@ const buildOutput = async ({
   centroids,
   establishments,
   populations,
+  stateByZip,
+  bandByZip,
+  percentiles,
+  densityMeta,
 }) => {
   const outDir = path.join(ROOT_DIR, OUTPUT_DIR);
   await ensureDir(outDir);
 
   const chunks = {};
   const chunkData = new Map();
+  const categoryIds = NAICS_CATEGORIES.map(({ id }) => id);
 
   centroids.forEach((centroid, zip) => {
     const pop = populations.get(zip) ?? 0;
     const estByCat = establishments.get(zip);
     const estObj = {};
+    const state = stateByZip.get(zip) ?? null;
+    const band = bandByZip.get(zip) ?? 0;
+    const lowPop = pop < POP_FLOOR;
+    const pn = new Array(categoryIds.length).fill(0);
+    const ps = new Array(categoryIds.length).fill(0);
 
     if (estByCat) {
       estByCat.forEach((value, key) => {
@@ -373,13 +508,43 @@ const buildOutput = async ({
       });
     }
 
+    categoryIds.forEach((id, index) => {
+      if (lowPop || pop <= 0) {
+        pn[index] = 0;
+        ps[index] = 0;
+        return;
+      }
+      const est = estByCat?.get(id) ?? 0;
+      const per10k = (est / pop) * 10000;
+      const value = log10p1(per10k);
+      const nationalBucket = percentiles.national[id]?.[band] ?? [];
+      const nationalRank = percentileRank(nationalBucket, value);
+      const nationalOpp = nationalRank === null ? 0 : 1 - nationalRank;
+
+      let stateOpp = nationalOpp;
+      const stateTable = state ? percentiles.stateTables.get(state) : null;
+      const stateBucket = stateTable?.[id]?.[band] ?? [];
+      if (stateBucket.length >= MIN_STATE_SAMPLE) {
+        const stateRank = percentileRank(stateBucket, value);
+        stateOpp = stateRank === null ? nationalOpp : 1 - stateRank;
+      }
+
+      pn[index] = Number.isFinite(nationalOpp) ? nationalOpp : 0;
+      ps[index] = Number.isFinite(stateOpp) ? stateOpp : pn[index];
+    });
+
     const record = {
       z: zip,
       lat: centroid.lat,
       lon: centroid.lon,
       p: pop,
       a: centroid.area ?? null,
+      s: state,
+      d: band,
+      lp: lowPop,
       e: estObj,
+      pn,
+      ps,
     };
 
     const chunkId = zip[0];
@@ -417,6 +582,11 @@ const buildOutput = async ({
     gazetteerYear,
     eps: OPPORTUNITY_EPS,
     categories: NAICS_CATEGORIES.map(({ id, label }) => ({ id, label })),
+    densityBands: {
+      thresholds: densityMeta.thresholds,
+      popFloor: POP_FLOOR,
+      minStateSample: MIN_STATE_SAMPLE,
+    },
     chunks: chunkIndex,
   };
 
@@ -484,8 +654,17 @@ const run = async () => {
     : await loadZipEntriesFromZip(zbpZipPath);
   const gazText = await loadZipEntriesFromZip(gazetteerZipPath);
 
-  const establishments = parseZbpDetail(zbpText);
+  const { byZip: establishments, stateByZip } = parseZbpDetail(zbpText);
   const centroids = parseGazetteerZcta(gazText);
+  const densityMeta = buildDensityBands(centroids, populations);
+  const percentiles = buildPercentileTables({
+    centroids,
+    populations,
+    establishments,
+    stateByZip,
+    bandByZip: densityMeta.bandByZip,
+    categoryIds: NAICS_CATEGORIES.map(({ id }) => id),
+  });
 
   await buildOutput({
     zbpYear,
@@ -494,6 +673,10 @@ const run = async () => {
     centroids,
     establishments,
     populations,
+    stateByZip,
+    bandByZip: densityMeta.bandByZip,
+    percentiles,
+    densityMeta,
   });
 
   console.log(
