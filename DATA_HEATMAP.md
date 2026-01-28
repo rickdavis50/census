@@ -28,7 +28,7 @@ npm run data:clean
 - Gazetteer ZCTA centroids: downloaded from Census Gazetteer files.
 
 ## API key (optional)
-The build uses the Census API for ACS population. It works without a key for one-time builds, but you may hit 429 rate limits.
+The build uses the Census API for ACS population. It works without a key for one-time builds, but you may hit 429 rate limits. If the API fails, the script automatically falls back to the ACS Summary File (table-based) download.
 
 If you have a key:
 ```bash

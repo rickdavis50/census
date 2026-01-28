@@ -71,6 +71,19 @@ const findLatestAcs = async () => {
   throw new Error("Unable to detect an ACS 5-year release.");
 };
 
+const findLatestAcsSummary = async () => {
+  for (let year = CURRENT_YEAR; year >= MIN_YEAR; year -= 1) {
+    const url = `https://www2.census.gov/programs-surveys/acs/summary_file/${year}/table-based-SF/data/5YRData/acsdt5y${year}-b01003.dat`;
+    try {
+      const response = await fetchWithRetry(url, { method: "HEAD" }, 1);
+      if (response.ok) return { year, url };
+    } catch {
+      // Try prior year.
+    }
+  }
+  throw new Error("Unable to detect an ACS Summary File release.");
+};
+
 const loadZipEntriesFromZip = async (zipPath) => {
   const buffer = await fs.readFile(zipPath);
   const files = unzipSync(new Uint8Array(buffer));
@@ -113,7 +126,8 @@ const parseZbpDetail = (text) => {
       ? headers.indexOf("zip")
       : headers.indexOf("zipcode");
   const naicsIndex = headers.findIndex((value) => value.startsWith("naics"));
-  const estabIndex = headers.indexOf("estab");
+  const estabIndex =
+    headers.indexOf("estab") !== -1 ? headers.indexOf("estab") : headers.indexOf("est");
 
   if (zipIndex === -1 || naicsIndex === -1 || estabIndex === -1) {
     throw new Error("ZBP headers missing ZIP/NAICS/ESTAB columns.");
@@ -227,6 +241,113 @@ const parseAcsPopulation = (data) => {
   return byZip;
 };
 
+const fetchAcsSummaryFiles = async (year, rawDir) => {
+  const dataPath = path.join(rawDir, `acs_summary_b01003_${year}.dat`);
+  const geoPath = path.join(rawDir, `acs_summary_geo_${year}.txt`);
+
+  if (!(await fileExists(dataPath))) {
+    const dataUrl = `https://www2.census.gov/programs-surveys/acs/summary_file/${year}/table-based-SF/data/5YRData/acsdt5y${year}-b01003.dat`;
+    await downloadToFile(dataUrl, dataPath);
+  }
+
+  if (!(await fileExists(geoPath))) {
+    const geoUrl = `https://www2.census.gov/programs-surveys/acs/summary_file/${year}/table-based-SF/documentation/Geos${year}5YR.txt`;
+    await downloadToFile(geoUrl, geoPath);
+  }
+
+  return { dataPath, geoPath };
+};
+
+const extractZctaFromGeo = (value) => {
+  const text = String(value ?? "").trim();
+  const match = text.match(/US(\d{5})$/);
+  if (match) return match[1];
+  if (/^\d{5}$/.test(text)) return text;
+  return null;
+};
+
+const parseAcsSummaryPopulation = async (dataPath, geoPath) => {
+  const dataText = await readText(dataPath);
+  const dataLines = dataText.split(/\r?\n/).filter(Boolean);
+  if (!dataLines.length) throw new Error("ACS summary data file is empty.");
+
+  const dataHeader = dataLines[0];
+  const dataDelimiter = detectDelimiter(dataHeader);
+  const dataHeaders = parseDelimitedLine(dataHeader, dataDelimiter).map((value) =>
+    value.trim().toLowerCase()
+  );
+  const dataGeoIndex =
+    dataHeaders.indexOf("geo_id") !== -1
+      ? dataHeaders.indexOf("geo_id")
+      : dataHeaders.indexOf("geoid");
+  const dataPopIndex =
+    dataHeaders.indexOf("b01003_001e") !== -1
+      ? dataHeaders.indexOf("b01003_001e")
+      : dataHeaders.indexOf("b01003_e001");
+
+  if (dataGeoIndex !== -1 && dataPopIndex !== -1) {
+    const byZip = new Map();
+    for (let i = 1; i < dataLines.length; i += 1) {
+      const row = parseDelimitedLine(dataLines[i], dataDelimiter);
+      const zip = extractZctaFromGeo(row[dataGeoIndex]);
+      if (!zip) continue;
+      const pop = Number(String(row[dataPopIndex] ?? "").trim());
+      byZip.set(zip, Number.isFinite(pop) ? pop : 0);
+    }
+    return byZip;
+  }
+
+  const geoText = await readText(geoPath);
+  const geoLines = geoText.split(/\r?\n/).filter(Boolean);
+  if (!geoLines.length) throw new Error("ACS summary GEO file is empty.");
+
+  const geoHeader = geoLines[0];
+  const geoDelimiter = detectDelimiter(geoHeader);
+  const geoHeaders = parseDelimitedLine(geoHeader, geoDelimiter).map((value) =>
+    value.trim().toLowerCase()
+  );
+  const geoLogRecIndex = geoHeaders.indexOf("logrecno");
+  const geoSumLevelIndex = geoHeaders.indexOf("sumlevel");
+  const geoIdIndex =
+    geoHeaders.indexOf("geoid") !== -1
+      ? geoHeaders.indexOf("geoid")
+      : geoHeaders.indexOf("geo_id");
+  const geoId2Index = geoHeaders.indexOf("geoid2");
+
+  if (geoLogRecIndex === -1 || geoSumLevelIndex === -1) {
+    throw new Error("ACS summary GEO headers missing LOGRECNO or SUMLEVEL.");
+  }
+
+  const logrecToZip = new Map();
+  for (let i = 1; i < geoLines.length; i += 1) {
+    const row = parseDelimitedLine(geoLines[i], geoDelimiter);
+    const sumLevel = String(row[geoSumLevelIndex] ?? "").trim();
+    if (sumLevel !== "860") continue;
+    const logrec = String(row[geoLogRecIndex] ?? "").trim();
+    const geoCandidate = row[geoId2Index] ?? row[geoIdIndex];
+    const zip = extractZctaFromGeo(geoCandidate);
+    if (logrec && zip) {
+      logrecToZip.set(logrec, zip);
+    }
+  }
+
+  const dataLogRecIndex = dataHeaders.indexOf("logrecno");
+  if (dataLogRecIndex === -1 || dataPopIndex === -1) {
+    throw new Error("ACS summary data headers missing LOGRECNO/B01003.");
+  }
+
+  const byZip = new Map();
+  for (let i = 1; i < dataLines.length; i += 1) {
+    const row = parseDelimitedLine(dataLines[i], dataDelimiter);
+    const logrec = String(row[dataLogRecIndex] ?? "").trim();
+    const zip = logrecToZip.get(logrec);
+    if (!zip) continue;
+    const pop = Number(String(row[dataPopIndex] ?? "").trim());
+    byZip.set(zip, Number.isFinite(pop) ? pop : 0);
+  }
+
+  return byZip;
+};
 const buildOutput = async ({
   zbpYear,
   acsYear,
@@ -306,12 +427,32 @@ const run = async () => {
   const rawDir = path.join(ROOT_DIR, RAW_DIR);
   await ensureDir(rawDir);
 
-  const { year: zbpYear, url: zbpUrl } = await findLatestZbp();
-  const { year: acsYear } = await findLatestAcs();
+  const rawFiles = await fs.readdir(rawDir).catch(() => []);
+  const localZbpZip = rawFiles.find((name) => name.match(/^zbp_(\d{4})\.zip$/));
+  const localZbpTxt = rawFiles.find((name) => name.match(/^zbp_(\d{4})\.txt$/));
+  let zbpYear = null;
+  let zbpUrl = null;
+
+  if (localZbpZip) {
+    zbpYear = Number(localZbpZip.match(/^zbp_(\d{4})\.zip$/)[1]);
+  } else if (localZbpTxt) {
+    zbpYear = Number(localZbpTxt.match(/^zbp_(\d{4})\.txt$/)[1]);
+  } else {
+    const remote = await findLatestZbp();
+    zbpYear = remote.year;
+    zbpUrl = remote.url;
+  }
+  let acsYear = null;
+  try {
+    acsYear = (await findLatestAcs()).year;
+  } catch {
+    // Defer to summary file detection if API probing fails.
+  }
   const { year: gazetteerYear, url: gazetteerUrl } = await findLatestGazetteer();
 
   const zbpZipPath = path.join(rawDir, `zbp_${zbpYear}.zip`);
-  if (!(await fileExists(zbpZipPath))) {
+  const zbpTxtPath = path.join(rawDir, `zbp_${zbpYear}.txt`);
+  if (!(await fileExists(zbpZipPath)) && !(await fileExists(zbpTxtPath))) {
     await downloadToFile(zbpUrl, zbpZipPath);
   }
 
@@ -320,14 +461,30 @@ const run = async () => {
     await downloadToFile(gazetteerUrl, gazetteerZipPath);
   }
 
-  const acsPath = await fetchAcsPopulation(acsYear, rawDir);
-  const acsData = JSON.parse(await readText(acsPath));
+  let populations = null;
+  if (acsYear) {
+    try {
+      const acsPath = await fetchAcsPopulation(acsYear, rawDir);
+      const acsData = JSON.parse(await readText(acsPath));
+      populations = parseAcsPopulation(acsData);
+    } catch {
+      populations = null;
+    }
+  }
 
-  const zbpText = await loadZipEntriesFromZip(zbpZipPath);
+  if (!populations) {
+    const { year: summaryYear } = await findLatestAcsSummary();
+    acsYear = summaryYear;
+    const { dataPath, geoPath } = await fetchAcsSummaryFiles(summaryYear, rawDir);
+    populations = await parseAcsSummaryPopulation(dataPath, geoPath);
+  }
+
+  const zbpText = (await fileExists(zbpTxtPath))
+    ? await readText(zbpTxtPath)
+    : await loadZipEntriesFromZip(zbpZipPath);
   const gazText = await loadZipEntriesFromZip(gazetteerZipPath);
 
   const establishments = parseZbpDetail(zbpText);
-  const populations = parseAcsPopulation(acsData);
   const centroids = parseGazetteerZcta(gazText);
 
   await buildOutput({
