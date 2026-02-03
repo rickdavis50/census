@@ -26,6 +26,7 @@ const VIEW_MODES = {
   ZIP: "zip",
   STATE: "state",
 };
+const STATES_GEOJSON_URL = "/data/us-states.geojson";
 
 const STATE_FIPS_BY_ABBR = {
   AL: "01",
@@ -82,6 +83,11 @@ const STATE_FIPS_BY_ABBR = {
 };
 
 const STATE_FIPS = Object.values(STATE_FIPS_BY_ABBR);
+
+const normalizeStateId = (value) =>
+  String(value ?? "")
+    .trim()
+    .padStart(2, "0");
 
 const formatNumber = (value) =>
   Number(value ?? 0).toLocaleString("en-US", {
@@ -247,6 +253,7 @@ function NaicsHeatMapView() {
   const popupRef = useRef(null);
   const refreshTimerRef = useRef(null);
   const categoryLabelRef = useRef("");
+  const stateDataRef = useRef(new Map());
 
   const loadedChunksRef = useRef(new Map());
   const loadedPointsRef = useRef([]);
@@ -417,7 +424,7 @@ function NaicsHeatMapView() {
         if (!Number.isFinite(pop) || pop <= 0) return;
         const est = item.e?.[categoryId] ?? 0;
         if (!Number.isFinite(est)) return;
-        const entry = stateTotals.get(fips) ?? { pop: 0, estab: 0 };
+        const entry = stateTotals.get(fips) ?? { pop: 0, estab: 0, fips };
         entry.pop += pop;
         entry.estab += est;
         stateTotals.set(fips, entry);
@@ -454,11 +461,7 @@ function NaicsHeatMapView() {
       if (map?.getSource("states")) {
         STATE_FIPS.forEach((fips) => {
           map.setFeatureState(
-            { source: "states", sourceLayer: "states", id: fips },
-            { opportunity: 0, per10k: 0, pop: 0, estab: 0 }
-          );
-          map.setFeatureState(
-            { source: "states", sourceLayer: "states", id: Number(fips) },
+            { source: "states", id: fips },
             { opportunity: 0, per10k: 0, pop: 0, estab: 0 }
           );
         });
@@ -470,16 +473,13 @@ function NaicsHeatMapView() {
             estab: row.estab,
           };
           map.setFeatureState(
-            { source: "states", sourceLayer: "states", id: fips },
-            payload
-          );
-          map.setFeatureState(
-            { source: "states", sourceLayer: "states", id: Number(fips) },
+            { source: "states", id: fips },
             payload
           );
         });
       }
 
+      stateDataRef.current = byFips;
       setLegend({ min: minOpp ?? 0, max: maxOpp ?? 1, medianPer10k });
       setStateStats({
         count: rows.length,
@@ -606,9 +606,9 @@ function NaicsHeatMapView() {
         data: EMPTY_GEOJSON,
       });
       map.addSource("states", {
-        type: "vector",
-        url: "mapbox://mapbox.us_census_states_2015",
-        promoteId: "STATE_ID",
+        type: "geojson",
+        data: STATES_GEOJSON_URL,
+        promoteId: "STATE",
       });
 
       map.addLayer({
@@ -666,8 +666,8 @@ function NaicsHeatMapView() {
         id: "naics-states",
         type: "fill",
         source: "states",
-        "source-layer": "states",
         layout: { visibility: "none" },
+        filter: ["in", ["get", "STATE"], ...STATE_FIPS],
         paint: {
           "fill-color": [
             "interpolate",
@@ -692,8 +692,8 @@ function NaicsHeatMapView() {
         id: "naics-states-outline",
         type: "line",
         source: "states",
-        "source-layer": "states",
         layout: { visibility: "none" },
+        filter: ["in", ["get", "STATE"], ...STATE_FIPS],
         paint: {
           "line-color": "#0B1220",
           "line-width": 1,
@@ -730,21 +730,11 @@ function NaicsHeatMapView() {
         const feature = event.features?.[0];
         if (!feature) return;
         const name =
-          feature.properties?.name ??
           feature.properties?.NAME ??
-          feature.properties?.state ??
+          feature.properties?.name ??
           "State";
-        const stateId =
-          feature.id ??
-          feature.properties?.STATE_ID ??
-          feature.properties?.STATEFP ??
-          feature.properties?.statefp ??
-          "";
-        const stateData = map.getFeatureState({
-          source: "states",
-          sourceLayer: "states",
-          id: stateId,
-        });
+        const stateId = normalizeStateId(feature.id ?? feature.properties?.STATE);
+        const stateData = stateDataRef.current.get(stateId);
         const per10k = stateData?.per10k ?? 0;
         const opportunity = stateData?.opportunity ?? 0;
         const rating = classifyOpportunity(opportunity);
