@@ -109,6 +109,48 @@ const calcEstabPer10k = (estab, pop) =>
 
 const log10p1 = (value) => Math.log10(Math.max(0, value) + 1);
 
+const getOpportunityColor = (value) => {
+  const v = Math.max(0, Math.min(1, Number(value) || 0));
+  if (v <= 0.25) return "#1F2E2B";
+  if (v <= 0.5) return "#23624C";
+  if (v <= 0.75) return "#2BAA7B";
+  if (v <= 0.9) return "#7BE7C1";
+  return "#E7FFF4";
+};
+
+const deriveStateCentroids = (features = []) => {
+  const centroids = [];
+  features.forEach((feature) => {
+    const state = normalizeStateId(feature?.properties?.STATE ?? feature?.id);
+    if (!state) return;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const walk = (coords) => {
+      if (!Array.isArray(coords)) return;
+      if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+        const [x, y] = coords;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        return;
+      }
+      coords.forEach(walk);
+    };
+    walk(feature?.geometry?.coordinates ?? []);
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+    centroids.push({
+      state,
+      name: feature?.properties?.NAME ?? "State",
+      lat: (minY + maxY) / 2,
+      lng: (minX + maxX) / 2,
+    });
+  });
+  return centroids;
+};
+
 const buildTooltipHtml = ({
   zip,
   name,
@@ -254,6 +296,7 @@ function NaicsHeatMapView() {
   const popupRef = useRef(null);
   const refreshTimerRef = useRef(null);
   const categoryLabelRef = useRef("");
+  const stateMarkersRef = useRef([]);
 
   const loadedChunksRef = useRef(new Map());
   const loadedPointsRef = useRef([]);
@@ -386,6 +429,11 @@ function NaicsHeatMapView() {
     if (!indexMeta?.chunks) return;
     await ensureChunksLoaded(Object.keys(indexMeta.chunks));
   }, [ensureChunksLoaded, indexMeta]);
+
+  const clearStateMarkers = useCallback(() => {
+    stateMarkersRef.current.forEach((marker) => marker.remove());
+    stateMarkersRef.current = [];
+  }, []);
 
   const buildFeatures = useCallback(
     (points, localOppMap, weights) => {
@@ -529,8 +577,12 @@ function NaicsHeatMapView() {
         });
       }
 
-      if (map?.getSource("state-centroids") && stateCentroids.length) {
-        const features = stateCentroids
+      const centroidSource =
+        stateCentroids.length > 0
+          ? stateCentroids
+          : deriveStateCentroids(stateShapes?.features);
+      if (map?.getSource("state-centroids") && centroidSource?.length) {
+        const features = centroidSource
           .filter((item) => STATE_FIPS.includes(item.state))
           .map((item) => {
             const row = byFips.get(item.state);
@@ -549,6 +601,24 @@ function NaicsHeatMapView() {
           });
         const source = map.getSource("state-centroids");
         source.setData({ type: "FeatureCollection", features });
+
+        clearStateMarkers();
+        features.forEach((feature) => {
+          const el = document.createElement("div");
+          const opportunity = feature.properties?.opportunity ?? 0;
+          el.style.width = "12px";
+          el.style.height = "12px";
+          el.style.borderRadius = "999px";
+          el.style.backgroundColor = getOpportunityColor(opportunity);
+          el.style.border = "2px solid #0B1220";
+          el.style.boxShadow = "0 0 6px rgba(15, 23, 42, 0.45)";
+          const marker = new mapboxgl.Marker({ element: el, anchor: "center" })
+            .setLngLat(feature.geometry.coordinates)
+            .addTo(map);
+          stateMarkersRef.current.push(marker);
+        });
+      } else {
+        clearStateMarkers();
       }
 
       setLegend({ min: minOpp ?? 0, max: maxOpp ?? 1, medianPer10k });
@@ -580,10 +650,13 @@ function NaicsHeatMapView() {
   }, [
     applyGeoJson,
     buildFeatures,
+    clearStateMarkers,
     ensureAllChunksLoaded,
     ensureChunksForBbox,
     indexMeta,
     categoryId,
+    stateCentroids,
+    stateShapes,
     viewMode,
   ]);
 
@@ -1003,8 +1076,12 @@ function NaicsHeatMapView() {
       map.setLayoutProperty("naics-state-dots", "visibility", stateVisibility);
     }
 
+    if (!showStates) {
+      clearStateMarkers();
+    }
+
     scheduleRefresh();
-  }, [scheduleRefresh, viewMode]);
+  }, [clearStateMarkers, scheduleRefresh, viewMode]);
 
   useEffect(() => {
     if (viewMode === VIEW_MODES.STATE) {
