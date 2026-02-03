@@ -22,6 +22,66 @@ const NEARBY_BBOX_DEGREES = 0.5;
 const DENSE_POP_PER_SQMI = 3000;
 const DENSE_POP_FALLBACK = 50000;
 const POP_FLOOR = 1000;
+const VIEW_MODES = {
+  ZIP: "zip",
+  STATE: "state",
+};
+
+const STATE_FIPS_BY_ABBR = {
+  AL: "01",
+  AK: "02",
+  AZ: "04",
+  AR: "05",
+  CA: "06",
+  CO: "08",
+  CT: "09",
+  DE: "10",
+  DC: "11",
+  FL: "12",
+  GA: "13",
+  HI: "15",
+  ID: "16",
+  IL: "17",
+  IN: "18",
+  IA: "19",
+  KS: "20",
+  KY: "21",
+  LA: "22",
+  ME: "23",
+  MD: "24",
+  MA: "25",
+  MI: "26",
+  MN: "27",
+  MS: "28",
+  MO: "29",
+  MT: "30",
+  NE: "31",
+  NV: "32",
+  NH: "33",
+  NJ: "34",
+  NM: "35",
+  NY: "36",
+  NC: "37",
+  ND: "38",
+  OH: "39",
+  OK: "40",
+  OR: "41",
+  PA: "42",
+  RI: "44",
+  SC: "45",
+  SD: "46",
+  TN: "47",
+  TX: "48",
+  UT: "49",
+  VT: "50",
+  VA: "51",
+  WA: "53",
+  WV: "54",
+  WI: "55",
+  WY: "56",
+};
+
+const STATE_FIPS = Object.values(STATE_FIPS_BY_ABBR);
 
 const formatNumber = (value) =>
   Number(value ?? 0).toLocaleString("en-US", {
@@ -55,6 +115,20 @@ const buildTooltipHtml = ({
     ${categoryLabel}<br/>
     Opportunity: ${rating}<br/>
     ${formatNumber(per10k)} per 10k (Local median ${formatNumber(medianPer10k)})
+  </div>
+`;
+
+const buildStateTooltipHtml = ({
+  name,
+  categoryLabel,
+  per10k,
+  rating,
+}) => `
+  <div style="font-size:12px;line-height:1.4">
+    <strong>${name || "State"}</strong><br/>
+    ${categoryLabel}<br/>
+    Opportunity: ${rating}<br/>
+    ${formatNumber(per10k)} per 10k residents
   </div>
 `;
 
@@ -181,10 +255,17 @@ function NaicsHeatMapView() {
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [viewMode, setViewMode] = useState(VIEW_MODES.ZIP);
   const [legend, setLegend] = useState({ min: null, max: null, medianPer10k: 0 });
   const [stats, setStats] = useState({
     visible: 0,
     loaded: 0,
+  });
+  const [stateStats, setStateStats] = useState({
+    count: 0,
+    medianPer10k: 0,
+    minPer10k: 0,
+    maxPer10k: 0,
   });
   const [zipQuery, setZipQuery] = useState("");
   const [zipError, setZipError] = useState("");
@@ -252,6 +333,11 @@ function NaicsHeatMapView() {
     await ensureChunksLoaded(needed);
   }, [ensureChunksLoaded, indexMeta]);
 
+  const ensureAllChunksLoaded = useCallback(async () => {
+    if (!indexMeta?.chunks) return;
+    await ensureChunksLoaded(Object.keys(indexMeta.chunks));
+  }, [ensureChunksLoaded, indexMeta]);
+
   const buildFeatures = useCallback(
     (points, localOppMap, weights) => {
       const features = [];
@@ -296,28 +382,104 @@ function NaicsHeatMapView() {
     [categoryId, categoryIndex]
   );
 
-const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
-  const map = mapRef.current;
-  if (!map) return;
-  const source = map.getSource("naics-zip");
-  if (source) {
-    source.setData(geojson);
-  }
-  if (map.getLayer("naics-points")) {
-    map.setPaintProperty("naics-points", "circle-opacity", [
-      "interpolate",
-      ["linear"],
-      ["coalesce", ["get", "opportunity"], 0],
-      minValue ?? 0,
-      0.45,
-      maxValue ?? 1,
-      0.95,
-    ]);
-  }
-}, []);
+  const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
+    if (viewMode !== VIEW_MODES.ZIP) return;
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource("naics-zip");
+    if (source) {
+      source.setData(geojson);
+    }
+    if (map.getLayer("naics-points")) {
+      map.setPaintProperty("naics-points", "circle-opacity", [
+        "interpolate",
+        ["linear"],
+        ["coalesce", ["get", "opportunity"], 0],
+        minValue ?? 0,
+        0.45,
+        maxValue ?? 1,
+        0.95,
+      ]);
+    }
+  }, [viewMode]);
 
   const refreshData = useCallback(async () => {
     if (!mapRef.current || !indexMeta) return;
+
+    if (viewMode === VIEW_MODES.STATE) {
+      await ensureAllChunksLoaded();
+      const stateTotals = new Map();
+      loadedPointsRef.current.forEach((item) => {
+        const abbr = item.s;
+        const fips = STATE_FIPS_BY_ABBR[abbr];
+        if (!fips) return;
+        const pop = item.p ?? 0;
+        if (!Number.isFinite(pop) || pop <= 0) return;
+        const est = item.e?.[categoryId] ?? 0;
+        if (!Number.isFinite(est)) return;
+        const entry = stateTotals.get(fips) ?? { pop: 0, estab: 0 };
+        entry.pop += pop;
+        entry.estab += est;
+        stateTotals.set(fips, entry);
+      });
+
+      const rows = [];
+      stateTotals.forEach((entry, fips) => {
+        if (entry.pop <= 0) return;
+        const per10k = calcEstabPer10k(entry.estab, entry.pop);
+        rows.push({ fips, ...entry, per10k });
+      });
+
+      const per10kSorted = rows.map((row) => row.per10k).sort((a, b) => a - b);
+      const mid = Math.floor(per10kSorted.length / 2);
+      const medianPer10k =
+        per10kSorted.length === 0
+          ? 0
+          : per10kSorted.length % 2 === 0
+          ? (per10kSorted[mid - 1] + per10kSorted[mid]) / 2
+          : per10kSorted[mid];
+
+      let minOpp = null;
+      let maxOpp = null;
+      const byFips = new Map();
+      rows.forEach((row) => {
+        const rank = percentileRank(per10kSorted, row.per10k);
+        const opportunity = rank === null ? 0 : 1 - rank;
+        byFips.set(row.fips, { ...row, opportunity });
+        minOpp = minOpp === null ? opportunity : Math.min(minOpp, opportunity);
+        maxOpp = maxOpp === null ? opportunity : Math.max(maxOpp, opportunity);
+      });
+
+      const map = mapRef.current;
+      if (map?.getSource("states")) {
+        STATE_FIPS.forEach((fips) => {
+          map.setFeatureState(
+            { source: "states", sourceLayer: "states", id: fips },
+            { opportunity: 0, per10k: 0, pop: 0, estab: 0 }
+          );
+        });
+        byFips.forEach((row, fips) => {
+          map.setFeatureState(
+            { source: "states", sourceLayer: "states", id: fips },
+            {
+              opportunity: row.opportunity,
+              per10k: row.per10k,
+              pop: row.pop,
+              estab: row.estab,
+            }
+          );
+        });
+      }
+
+      setLegend({ min: minOpp ?? 0, max: maxOpp ?? 1, medianPer10k });
+      setStateStats({
+        count: rows.length,
+        medianPer10k,
+        minPer10k: per10kSorted[0] ?? 0,
+        maxPer10k: per10kSorted[per10kSorted.length - 1] ?? 0,
+      });
+      return;
+    }
 
     const bounds = mapRef.current.getBounds();
     const bbox = bboxFromMap(bounds);
@@ -332,14 +494,18 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     const localOppMap = buildLocalOppMap(visible, categoryId);
     const localMedianPer10k = buildLocalMedianPer10k(visible, categoryId);
     const { features, min, max } = buildFeatures(visible, localOppMap, weights);
-    setLegend((prev) => ({
-      ...prev,
-      medianPer10k: localMedianPer10k,
-    }));
     applyGeoJson({ type: "FeatureCollection", features }, min, max);
-    setLegend({ min, max });
+    setLegend({ min, max, medianPer10k: localMedianPer10k });
     setStats({ visible: visible.length, loaded: loadedPointsRef.current.length });
-  }, [applyGeoJson, buildFeatures, ensureChunksForBbox, indexMeta, categoryId]);
+  }, [
+    applyGeoJson,
+    buildFeatures,
+    ensureAllChunksLoaded,
+    ensureChunksForBbox,
+    indexMeta,
+    categoryId,
+    viewMode,
+  ]);
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimerRef.current) {
@@ -352,6 +518,7 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
 
 
   const updateNearbyLayer = useCallback(() => {
+    if (viewMode !== VIEW_MODES.ZIP) return;
     const map = mapRef.current;
     if (!map) return;
     const source = map.getSource("nearby-zip");
@@ -393,7 +560,7 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     });
 
     source.setData({ type: "FeatureCollection", features });
-  }, [categoryId, nearbyRecords, targetRecord, categoryIndex]);
+  }, [categoryId, nearbyRecords, targetRecord, categoryIndex, viewMode]);
 
   useEffect(() => {
     updateNearbyLayer();
@@ -428,6 +595,11 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
       map.addSource("nearby-zip", {
         type: "geojson",
         data: EMPTY_GEOJSON,
+      });
+      map.addSource("states", {
+        type: "vector",
+        url: "mapbox://mapbox.us_census_states_2015",
+        promoteId: "STATEFP",
       });
 
       map.addLayer({
@@ -481,6 +653,44 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
         },
       });
 
+      map.addLayer({
+        id: "naics-states",
+        type: "fill",
+        source: "states",
+        "source-layer": "states",
+        layout: { visibility: "none" },
+        paint: {
+          "fill-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["feature-state", "opportunity"], 0],
+            0,
+            "#1F2E2B",
+            0.25,
+            "#23624C",
+            0.5,
+            "#2BAA7B",
+            0.75,
+            "#7BE7C1",
+            1,
+            "#E7FFF4",
+          ],
+          "fill-opacity": 0.85,
+        },
+      });
+
+      map.addLayer({
+        id: "naics-states-outline",
+        type: "line",
+        source: "states",
+        "source-layer": "states",
+        layout: { visibility: "none" },
+        paint: {
+          "line-color": "#0B1220",
+          "line-width": 1,
+        },
+      });
+
       map.on("click", "naics-points", (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
@@ -493,6 +703,45 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
           categoryLabel: categoryLabelRef.current,
           per10k,
           medianPer10k,
+          rating,
+        });
+
+        if (!popupRef.current) {
+          popupRef.current = new mapboxgl.Popup({
+            closeButton: true,
+            closeOnClick: true,
+            offset: 12,
+            className: "zb-popup",
+          });
+        }
+        popupRef.current.setLngLat(event.lngLat).setHTML(html).addTo(map);
+      });
+
+      map.on("click", "naics-states", (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const name =
+          feature.properties?.name ??
+          feature.properties?.NAME ??
+          feature.properties?.state ??
+          "State";
+        const stateId =
+          feature.id ??
+          feature.properties?.STATEFP ??
+          feature.properties?.statefp ??
+          "";
+        const stateData = map.getFeatureState({
+          source: "states",
+          sourceLayer: "states",
+          id: stateId,
+        });
+        const per10k = stateData?.per10k ?? 0;
+        const opportunity = stateData?.opportunity ?? 0;
+        const rating = classifyOpportunity(opportunity);
+        const html = buildStateTooltipHtml({
+          name,
+          categoryLabel: categoryLabelRef.current,
+          per10k,
           rating,
         });
 
@@ -589,6 +838,32 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
     scheduleRefresh();
   }, [categoryId, scheduleRefresh]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const showStates = viewMode === VIEW_MODES.STATE;
+    const zipVisibility = showStates ? "none" : "visible";
+    const stateVisibility = showStates ? "visible" : "none";
+
+    if (map.getLayer("naics-points")) {
+      map.setLayoutProperty("naics-points", "visibility", zipVisibility);
+    }
+    if (map.getLayer("nearby-zip-circle")) {
+      map.setLayoutProperty("nearby-zip-circle", "visibility", zipVisibility);
+    }
+    if (map.getLayer("nearby-zip-label")) {
+      map.setLayoutProperty("nearby-zip-label", "visibility", zipVisibility);
+    }
+    if (map.getLayer("naics-states")) {
+      map.setLayoutProperty("naics-states", "visibility", stateVisibility);
+    }
+    if (map.getLayer("naics-states-outline")) {
+      map.setLayoutProperty("naics-states-outline", "visibility", stateVisibility);
+    }
+
+    scheduleRefresh();
+  }, [scheduleRefresh, viewMode]);
+
   const handleZipSearch = useCallback(async () => {
     const zip = normalizeZip(zipQuery);
     if (!zip || zip.length !== 5) {
@@ -661,7 +936,9 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">NAICS Opportunity Heat Map</h2>
         <p className="text-sm text-zb-ink-muted">
-          ZIP-level opportunity heat map for {categoryLabel || "NAICS"}.
+          {viewMode === VIEW_MODES.STATE
+            ? `State-level opportunity heat map for ${categoryLabel || "NAICS"}.`
+            : `ZIP-level opportunity heat map for ${categoryLabel || "NAICS"}.`}
         </p>
         {indexMeta && (
           <p className="text-xs text-zb-ink-muted">
@@ -676,36 +953,57 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-3 text-xs text-zb-ink-muted">
-        <span className="uppercase tracking-[0.2em]">NAICS</span>
-        <select
-          className="rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
-          value={categoryId}
-          onChange={(event) => setCategoryId(event.target.value)}
-        >
-          {indexMeta?.categories?.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-3 text-xs text-zb-ink-muted">
-          <span className="uppercase tracking-[0.2em]">ZIP Search</span>
-          <input
-            className="w-28 rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
-            value={zipQuery}
-            placeholder="e.g. 94107"
-            onChange={(event) => setZipQuery(event.target.value)}
-          />
-          <Button size="sm" variant="secondary" onClick={handleZipSearch}>
-            Go
+      <div className="flex flex-wrap items-center gap-4 text-xs text-zb-ink-muted">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="uppercase tracking-[0.2em]">NAICS</span>
+          <select
+            className="rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+          >
+            {indexMeta?.categories?.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="uppercase tracking-[0.2em]">View</span>
+          <Button
+            size="sm"
+            variant={viewMode === VIEW_MODES.ZIP ? "primary" : "secondary"}
+            onClick={() => setViewMode(VIEW_MODES.ZIP)}
+          >
+            ZIP
           </Button>
-          {zipError && <span className="text-xs text-zb-rose">{zipError}</span>}
+          <Button
+            size="sm"
+            variant={viewMode === VIEW_MODES.STATE ? "primary" : "secondary"}
+            onClick={() => setViewMode(VIEW_MODES.STATE)}
+          >
+            State
+          </Button>
         </div>
       </div>
+
+      {viewMode === VIEW_MODES.ZIP && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-zb-ink-muted">
+            <span className="uppercase tracking-[0.2em]">ZIP Search</span>
+            <input
+              className="w-28 rounded-zb-sm border border-zb-border bg-zb-surface px-2 py-1 text-xs text-zb-ink"
+              value={zipQuery}
+              placeholder="e.g. 94107"
+              onChange={(event) => setZipQuery(event.target.value)}
+            />
+            <Button size="sm" variant="secondary" onClick={handleZipSearch}>
+              Go
+            </Button>
+            {zipError && <span className="text-xs text-zb-rose">{zipError}</span>}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-zb-md border border-zb-border bg-zb-subtle">
         <div ref={mapContainerRef} className="h-[560px] w-full" />
@@ -726,14 +1024,24 @@ const applyGeoJson = useCallback((geojson, minValue, maxValue) => {
             <span>{formatPercent(legendMax)}</span>
           </div>
           <p className="text-[11px]">
-            Colored points only (ZIPs with population ≥ {POP_FLOOR.toLocaleString()}).
+            {viewMode === VIEW_MODES.STATE
+              ? "State shading is relative to other states (per-capita concentration)."
+              : `Colored points only (ZIPs with population ≥ ${POP_FLOOR.toLocaleString()}).`}
           </p>
         </div>
-        <div className="space-y-1 text-right">
-          <p>Visible ZIPs: {formatNumber(stats.visible)}</p>
-          <p>Loaded ZIPs: {formatNumber(stats.loaded)}</p>
-          <p>Category: {categoryLabel || "—"}</p>
-        </div>
+        {viewMode === VIEW_MODES.STATE ? (
+          <div className="space-y-1 text-right">
+            <p>States: {formatNumber(stateStats.count)}</p>
+            <p>Median per 10k: {formatNumber(stateStats.medianPer10k)}</p>
+            <p>Category: {categoryLabel || "—"}</p>
+          </div>
+        ) : (
+          <div className="space-y-1 text-right">
+            <p>Visible ZIPs: {formatNumber(stats.visible)}</p>
+            <p>Loaded ZIPs: {formatNumber(stats.loaded)}</p>
+            <p>Category: {categoryLabel || "—"}</p>
+          </div>
+        )}
       </div>
     </Card>
   );
