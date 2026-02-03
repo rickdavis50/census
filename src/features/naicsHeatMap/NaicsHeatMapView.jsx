@@ -457,16 +457,25 @@ function NaicsHeatMapView() {
             { source: "states", sourceLayer: "states", id: fips },
             { opportunity: 0, per10k: 0, pop: 0, estab: 0 }
           );
+          map.setFeatureState(
+            { source: "states", sourceLayer: "states", id: Number(fips) },
+            { opportunity: 0, per10k: 0, pop: 0, estab: 0 }
+          );
         });
         byFips.forEach((row, fips) => {
+          const payload = {
+            opportunity: row.opportunity,
+            per10k: row.per10k,
+            pop: row.pop,
+            estab: row.estab,
+          };
           map.setFeatureState(
             { source: "states", sourceLayer: "states", id: fips },
-            {
-              opportunity: row.opportunity,
-              per10k: row.per10k,
-              pop: row.pop,
-              estab: row.estab,
-            }
+            payload
+          );
+          map.setFeatureState(
+            { source: "states", sourceLayer: "states", id: Number(fips) },
+            payload
           );
         });
       }
@@ -599,7 +608,7 @@ function NaicsHeatMapView() {
       map.addSource("states", {
         type: "vector",
         url: "mapbox://mapbox.us_census_states_2015",
-        promoteId: "STATEFP",
+        promoteId: "STATE_ID",
       });
 
       map.addLayer({
@@ -727,6 +736,7 @@ function NaicsHeatMapView() {
           "State";
         const stateId =
           feature.id ??
+          feature.properties?.STATE_ID ??
           feature.properties?.STATEFP ??
           feature.properties?.statefp ??
           "";
