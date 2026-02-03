@@ -2,6 +2,13 @@ export const NAICS_CATEGORIES = [
   { id: "restaurants", label: "Restaurants", prefixes: ["7225"] },
   { id: "food_trucks", label: "Food Trucks", prefixes: ["722330"] },
   { id: "auto_repair", label: "Auto Repair", prefixes: ["8111"] },
+  {
+    id: "construction_trades",
+    label: "Construction (Specialty Trades)",
+    prefixes: ["238"],
+  },
+  { id: "janitorial", label: "Janitorial Services", prefixes: ["56172"] },
+  { id: "landscaping", label: "Landscaping Services", prefixes: ["56173"] },
   { id: "real_estate", label: "Real Estate Offices", prefixes: ["53121"] },
   { id: "nail_salons", label: "Nail Salons", prefixes: ["812113"] },
   { id: "hair_salons", label: "Hair Salons", prefixes: ["812112"] },
