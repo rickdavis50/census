@@ -254,7 +254,6 @@ function NaicsHeatMapView() {
   const popupRef = useRef(null);
   const refreshTimerRef = useRef(null);
   const categoryLabelRef = useRef("");
-  const stateDataRef = useRef(new Map());
 
   const loadedChunksRef = useRef(new Map());
   const loadedPointsRef = useRef([]);
@@ -266,6 +265,7 @@ function NaicsHeatMapView() {
   const [viewMode, setViewMode] = useState(VIEW_MODES.ZIP);
   const [legend, setLegend] = useState({ min: null, max: null, medianPer10k: 0 });
   const [stateCentroids, setStateCentroids] = useState([]);
+  const [stateShapes, setStateShapes] = useState(null);
   const [stats, setStats] = useState({
     visible: 0,
     loaded: 0,
@@ -314,6 +314,29 @@ function NaicsHeatMapView() {
       .catch((err) => {
         if (!isActive) return;
         setError(err instanceof Error ? err.message : "Failed to load state centroids.");
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    fetch(STATES_GEOJSON_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load state shapes (${response.status}).`);
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (!isActive) return;
+        setStateShapes(data);
+      })
+      .catch((err) => {
+        if (!isActive) return;
+        setError(err instanceof Error ? err.message : "Failed to load state shapes.");
       });
 
     return () => {
@@ -477,24 +500,32 @@ function NaicsHeatMapView() {
       });
 
       const map = mapRef.current;
-      if (map?.getSource("states")) {
-        STATE_FIPS.forEach((fips) => {
-          map.setFeatureState(
-            { source: "states", id: fips },
-            { opportunity: 0, per10k: 0, pop: 0, estab: 0 }
-          );
-        });
-        byFips.forEach((row, fips) => {
-          const payload = {
-            opportunity: row.opportunity,
-            per10k: row.per10k,
-            pop: row.pop,
-            estab: row.estab,
-          };
-          map.setFeatureState(
-            { source: "states", id: fips },
-            payload
-          );
+      if (map?.getSource("states") && stateShapes?.features?.length) {
+        const features = stateShapes.features
+          .filter((feature) =>
+            STATE_FIPS.includes(
+              normalizeStateId(feature.properties?.STATE ?? feature.id)
+            )
+          )
+          .map((feature) => {
+            const stateId = normalizeStateId(
+              feature.properties?.STATE ?? feature.id
+            );
+            const row = byFips.get(stateId);
+            return {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                opportunity: row?.opportunity ?? 0,
+                per10k: row?.per10k ?? 0,
+                pop: row?.pop ?? 0,
+                estab: row?.estab ?? 0,
+              },
+            };
+          });
+        map.getSource("states").setData({
+          ...stateShapes,
+          features,
         });
       }
 
@@ -520,7 +551,6 @@ function NaicsHeatMapView() {
         source.setData({ type: "FeatureCollection", features });
       }
 
-      stateDataRef.current = byFips;
       setLegend({ min: minOpp ?? 0, max: maxOpp ?? 1, medianPer10k });
       setStateStats({
         count: rows.length,
@@ -652,7 +682,7 @@ function NaicsHeatMapView() {
       });
       map.addSource("states", {
         type: "geojson",
-        data: STATES_GEOJSON_URL,
+        data: EMPTY_GEOJSON,
         promoteId: "STATE",
       });
 
@@ -717,7 +747,7 @@ function NaicsHeatMapView() {
           "fill-color": [
             "interpolate",
             ["linear"],
-            ["coalesce", ["feature-state", "opportunity"], 0],
+            ["coalesce", ["get", "opportunity"], 0],
             0,
             "#1F2E2B",
             0.25,
@@ -844,10 +874,8 @@ function NaicsHeatMapView() {
           feature.properties?.NAME ??
           feature.properties?.name ??
           "State";
-        const stateId = normalizeStateId(feature.id ?? feature.properties?.STATE);
-        const stateData = stateDataRef.current.get(stateId);
-        const per10k = stateData?.per10k ?? 0;
-        const opportunity = stateData?.opportunity ?? 0;
+        const per10k = feature.properties?.per10k ?? 0;
+        const opportunity = feature.properties?.opportunity ?? 0;
         const rating = classifyOpportunity(opportunity);
         const html = buildStateTooltipHtml({
           name,
@@ -977,6 +1005,12 @@ function NaicsHeatMapView() {
 
     scheduleRefresh();
   }, [scheduleRefresh, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === VIEW_MODES.STATE) {
+      scheduleRefresh();
+    }
+  }, [scheduleRefresh, stateCentroids, stateShapes, viewMode]);
 
   const handleZipSearch = useCallback(async () => {
     const zip = normalizeZip(zipQuery);
