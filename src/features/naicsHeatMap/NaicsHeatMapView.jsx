@@ -667,7 +667,7 @@ function NaicsHeatMapView() {
         type: "fill",
         source: "states",
         layout: { visibility: "none" },
-        filter: ["in", ["get", "STATE"], ...STATE_FIPS],
+        filter: ["in", ["get", "STATE"], ["literal", STATE_FIPS]],
         paint: {
           "fill-color": [
             "interpolate",
@@ -693,7 +693,7 @@ function NaicsHeatMapView() {
         type: "line",
         source: "states",
         layout: { visibility: "none" },
-        filter: ["in", ["get", "STATE"], ...STATE_FIPS],
+        filter: ["in", ["get", "STATE"], ["literal", STATE_FIPS]],
         paint: {
           "line-color": "#0B1220",
           "line-width": 1,
