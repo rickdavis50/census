@@ -11,6 +11,7 @@ import {
   loadOpportunityIndex,
   normalizeZip,
 } from "./opportunityData";
+import { loadStateCentroids } from "./naicsHeatMapData";
 
 const EMPTY_GEOJSON = {
   type: "FeatureCollection",
@@ -264,6 +265,7 @@ function NaicsHeatMapView() {
   const [categoryId, setCategoryId] = useState("");
   const [viewMode, setViewMode] = useState(VIEW_MODES.ZIP);
   const [legend, setLegend] = useState({ min: null, max: null, medianPer10k: 0 });
+  const [stateCentroids, setStateCentroids] = useState([]);
   const [stats, setStats] = useState({
     visible: 0,
     loaded: 0,
@@ -295,6 +297,23 @@ function NaicsHeatMapView() {
         if (!isActive) return;
         setError(err instanceof Error ? err.message : "Failed to load ZIP data.");
         setStatus("error");
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+    loadStateCentroids()
+      .then((data) => {
+        if (!isActive) return;
+        setStateCentroids(Array.isArray(data) ? data : []);
+      })
+      .catch((err) => {
+        if (!isActive) return;
+        setError(err instanceof Error ? err.message : "Failed to load state centroids.");
       });
 
     return () => {
@@ -479,6 +498,28 @@ function NaicsHeatMapView() {
         });
       }
 
+      if (map?.getSource("state-centroids") && stateCentroids.length) {
+        const features = stateCentroids
+          .filter((item) => STATE_FIPS.includes(item.state))
+          .map((item) => {
+            const row = byFips.get(item.state);
+            return {
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [item.lng, item.lat] },
+              properties: {
+                state: item.state,
+                name: item.name,
+                per10k: row?.per10k ?? 0,
+                opportunity: row?.opportunity ?? 0,
+                pop: row?.pop ?? 0,
+                estab: row?.estab ?? 0,
+              },
+            };
+          });
+        const source = map.getSource("state-centroids");
+        source.setData({ type: "FeatureCollection", features });
+      }
+
       stateDataRef.current = byFips;
       setLegend({ min: minOpp ?? 0, max: maxOpp ?? 1, medianPer10k });
       setStateStats({
@@ -605,6 +646,10 @@ function NaicsHeatMapView() {
         type: "geojson",
         data: EMPTY_GEOJSON,
       });
+      map.addSource("state-centroids", {
+        type: "geojson",
+        data: EMPTY_GEOJSON,
+      });
       map.addSource("states", {
         type: "geojson",
         data: STATES_GEOJSON_URL,
@@ -700,6 +745,44 @@ function NaicsHeatMapView() {
         },
       });
 
+      map.addLayer({
+        id: "naics-state-dots",
+        type: "circle",
+        source: "state-centroids",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+          ],
+          "circle-color": [
+            "interpolate",
+            ["linear"],
+            ["coalesce", ["get", "opportunity"], 0],
+            0,
+            "#1F2E2B",
+            0.25,
+            "#23624C",
+            0.5,
+            "#2BAA7B",
+            0.75,
+            "#7BE7C1",
+            1,
+            "#E7FFF4",
+          ],
+          "circle-opacity": 0.95,
+          "circle-stroke-color": "#0B1220",
+          "circle-stroke-width": 1.25,
+        },
+      });
+
       map.on("click", "naics-points", (event) => {
         const feature = event.features?.[0];
         if (!feature) return;
@@ -712,6 +795,34 @@ function NaicsHeatMapView() {
           categoryLabel: categoryLabelRef.current,
           per10k,
           medianPer10k,
+          rating,
+        });
+
+        if (!popupRef.current) {
+          popupRef.current = new mapboxgl.Popup({
+            closeButton: true,
+            closeOnClick: true,
+            offset: 12,
+            className: "zb-popup",
+          });
+        }
+        popupRef.current.setLngLat(event.lngLat).setHTML(html).addTo(map);
+      });
+
+      map.on("click", "naics-state-dots", (event) => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const name =
+          feature.properties?.name ??
+          feature.properties?.NAME ??
+          "State";
+        const per10k = feature.properties?.per10k ?? 0;
+        const opportunity = feature.properties?.opportunity ?? 0;
+        const rating = classifyOpportunity(opportunity);
+        const html = buildStateTooltipHtml({
+          name,
+          categoryLabel: categoryLabelRef.current,
+          per10k,
           rating,
         });
 
@@ -859,6 +970,9 @@ function NaicsHeatMapView() {
     }
     if (map.getLayer("naics-states-outline")) {
       map.setLayoutProperty("naics-states-outline", "visibility", stateVisibility);
+    }
+    if (map.getLayer("naics-state-dots")) {
+      map.setLayoutProperty("naics-state-dots", "visibility", stateVisibility);
     }
 
     scheduleRefresh();
