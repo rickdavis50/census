@@ -34,7 +34,8 @@ const DB_NAME = "census-cache";
 const DB_STORE = "keyval";
 const GAZETTEER_URL =
   "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2023_Gazetteer/2023_Gaz_zcta_national.zip";
-const STATE_CENTROIDS_URL = "/state-centroids.json";
+const BASE_URL = String(import.meta.env.BASE_URL || "/");
+const STATE_CENTROIDS_URL = `${BASE_URL.replace(/\/$/, "")}/state-centroids.json`;
 const CENSUS_PROXY_URL = String(
   import.meta.env.VITE_CENSUS_PROXY_URL ?? ""
 ).trim().replace(/\/$/, "");

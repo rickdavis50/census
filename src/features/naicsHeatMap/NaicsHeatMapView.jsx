@@ -27,7 +27,8 @@ const VIEW_MODES = {
   ZIP: "zip",
   STATE: "state",
 };
-const STATES_GEOJSON_URL = "/data/us-states.geojson";
+const BASE_URL = String(import.meta.env.BASE_URL || "/");
+const STATES_GEOJSON_URL = `${BASE_URL.replace(/\/$/, "")}/data/us-states.geojson`;
 
 const STATE_FIPS_BY_ABBR = {
   AL: "01",
@@ -1172,7 +1173,7 @@ function NaicsHeatMapView() {
         )}
       </div>
 
-      {status === "error" && (
+      {error && (
         <div className="rounded-zb-sm border border-zb-border bg-zb-subtle px-4 py-3 text-sm text-zb-ink">
           {error}
         </div>
